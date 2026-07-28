@@ -104,6 +104,8 @@ export interface Alert {
   status: 'active' | 'resolved'
   createdAt: number
   resolvedAt?: number
+  source?: 'community' | 'agency'
+  agencyId?: 'wmata' | 'mta' | 'bart'
 }
 
 export interface AppUser {

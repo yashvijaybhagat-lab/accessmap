@@ -1,4 +1,4 @@
-import { AlertTriangle, Check } from 'lucide-react'
+import { AlertTriangle, Check, BadgeCheck } from 'lucide-react'
 import type { Alert } from '../types'
 import { useStore } from '../store/useStore'
 import { useNow } from '../lib/useNow'
@@ -23,6 +23,12 @@ const TYPE_LABEL: Record<Alert['type'], string> = {
   other: 'Issue',
 }
 
+const AGENCY_LABEL: Record<NonNullable<Alert['agencyId']>, string> = {
+  wmata: 'WMATA',
+  mta: 'MTA',
+  bart: 'BART',
+}
+
 interface Props {
   alert: Alert
   onResolve?: (id: string) => void
@@ -33,7 +39,9 @@ export default function AlertBanner({ alert, onResolve }: Props) {
   const isAdmin = user?.role === 'admin'
   const now = useNow()
   const ago = timeAgo(alert.createdAt, now)
-  const spoken = `Live alert. ${TYPE_LABEL[alert.type]}. ${alert.description}. Reported ${ago}, ${alert.aiVerified ? 'AI verified' : 'unverified'}.`
+  const isAgency = alert.source === 'agency'
+  const agencyLabel = alert.agencyId ? AGENCY_LABEL[alert.agencyId] : null
+  const spoken = `Live alert. ${TYPE_LABEL[alert.type]}. ${alert.description}. ${isAgency ? `Official ${agencyLabel} report.` : `Reported ${ago}, ${alert.aiVerified ? 'AI verified' : 'unverified'}.`}`
 
   return (
     <div className="flex items-center gap-3 rounded-xl border border-alert/40 bg-alert/10 px-4 py-3 animate-alert-glow">
@@ -43,9 +51,19 @@ export default function AlertBanner({ alert, onResolve }: Props) {
           <span className="font-semibold text-alert">{TYPE_LABEL[alert.type]} — </span>
           {alert.description}
         </p>
-        <p className="label mt-0.5">
-          reported {ago} · by {alert.reportedBy} ·{' '}
-          {alert.aiVerified ? 'AI verified' : 'unverified'}
+        <p className="label mt-0.5 flex items-center gap-1.5">
+          {isAgency && agencyLabel ? (
+            <>
+              <BadgeCheck size={12} className="text-blue-400" aria-hidden="true" />
+              <span className="font-semibold text-blue-400">{agencyLabel} Official</span>
+              <span className="text-muted">· {ago}</span>
+            </>
+          ) : (
+            <>
+              reported {ago} · by {alert.reportedBy} ·{' '}
+              {alert.aiVerified ? 'AI verified' : 'unverified'}
+            </>
+          )}
         </p>
       </div>
       <SpeakButton text={spoken} label="Read alert" variant="icon" className="shrink-0" />

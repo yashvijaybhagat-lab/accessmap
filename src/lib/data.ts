@@ -2,6 +2,8 @@ import { FIREBASE_ENABLED, getDb } from './firebase'
 import type { Place, Review, Alert, AccessSpecs, Scores } from '../types'
 import { mockPlaces, mockReviews, mockAlerts } from './mockData'
 import { checkRate } from './rateLimit'
+import { fetchAgencyOutages, outageToAlert } from './transitAlerts'
+import type { AgencyOutage } from './transitAlerts'
 
 /* Firestore SDK is loaded lazily (and cached) so it never enters the initial
  * bundle in mock-data mode — every Firebase branch awaits `fs()` for its fns. */
@@ -371,4 +373,63 @@ export function subscribeReviews(
   run()
   const unsub = subscribeLocal(run)
   return () => { active = false; unsub() }
+}
+
+// ── Agency alert sync ──────────────────────────────────────────────────────
+
+const AGENCY_SYNC_INTERVAL = 5 * 60 * 1000
+let _agencySyncTimer: ReturnType<typeof setInterval> | null = null
+let _lastSyncedOutageIds = new Set<string>()
+
+async function resolveOutagePlaceId(outage: AgencyOutage): Promise<string | null> {
+  if (outage.placeId) return outage.placeId
+  const places = await getPlaces()
+  const needle = outage.stationName.toLowerCase()
+  const match = places.find(
+    (p) =>
+      p.name.toLowerCase().includes(needle) ||
+      needle.includes(p.name.toLowerCase().split(' ')[0]),
+  )
+  return match?.id ?? null
+}
+
+export async function syncAgencyAlerts(): Promise<void> {
+  let outages: AgencyOutage[]
+  try {
+    outages = await fetchAgencyOutages()
+  } catch {
+    return
+  }
+
+  const freshIds = new Set(outages.map((o) => o.id))
+
+  for (const outage of outages) {
+    if (_lastSyncedOutageIds.has(outage.id)) continue
+    const placeId = await resolveOutagePlaceId(outage)
+    if (!placeId) continue
+    const existing = await getAlerts(placeId, true)
+    const alreadyStored = existing.some(
+      (a) => a.source === 'agency' && a.description.includes(outage.unit),
+    )
+    if (alreadyStored) continue
+    await addAlert(outageToAlert(outage, placeId))
+  }
+
+  const allActive = await getAlerts(undefined, true)
+  for (const alert of allActive) {
+    if (alert.source !== 'agency') continue
+    const stillActive = outages.some((o) => alert.description.includes(o.unit))
+    if (!stillActive) await resolveAlert(alert.id)
+  }
+
+  _lastSyncedOutageIds = freshIds
+}
+
+export function startAgencyAlertSync(): () => void {
+  syncAgencyAlerts()
+  if (_agencySyncTimer) clearInterval(_agencySyncTimer)
+  _agencySyncTimer = setInterval(syncAgencyAlerts, AGENCY_SYNC_INTERVAL)
+  return () => {
+    if (_agencySyncTimer) { clearInterval(_agencySyncTimer); _agencySyncTimer = null }
+  }
 }

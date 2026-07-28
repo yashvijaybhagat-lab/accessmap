@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import { useStore } from './store/useStore'
+import { startAgencyAlertSync } from './lib/data'
 import AccessibilityPanel from './components/AccessibilityPanel'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionStatus from './components/ConnectionStatus'
@@ -52,6 +53,7 @@ export default function App() {
   const initAuth = useStore((s) => s.initAuth)
   const location = useLocation()
   useEffect(() => { initAuth() }, [initAuth])
+  useEffect(() => startAgencyAlertSync(), [])
 
   return (
     <>
