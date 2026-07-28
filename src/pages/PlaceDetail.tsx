@@ -5,7 +5,7 @@ import {
   ShieldCheck, ShieldAlert, Bookmark, ExternalLink, BadgeCheck,
   CheckCircle2, ArrowUpDown, Car, Zap, Toilet as ToiletIcon,
   Footprints, Clock, Phone, Globe, Camera, ChevronDown, ChevronUp,
-  Info,
+  Info, Building2,
 } from 'lucide-react'
 import { googleMapsTo } from '../lib/maps'
 import Layout from '../components/Layout'
@@ -597,6 +597,7 @@ export default function PlaceDetail() {
         <button onClick={() => setShowSpecsForm(true)} className="btn-ghost"><CheckCircle2 size={16} /> Add specs</button>
         <button onClick={() => setShowReport(true)} className="btn-alert"><Flag size={16} /> Report issue</button>
         <Link to="/route" className="btn-ghost"><RouteIcon size={16} /> Route</Link>
+        <Link to={`/place/${place.id}/indoor`} className="btn-ghost"><Building2 size={16} /> Indoor map</Link>
         <a href={googleMapsTo([place.lat, place.lng])} target="_blank" rel="noreferrer" className="gmaps-btn">
           <ExternalLink size={16} /> Google Maps
         </a>

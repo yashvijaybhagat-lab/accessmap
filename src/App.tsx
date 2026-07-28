@@ -9,7 +9,7 @@ import {
   HomeSkeleton, MapSkeleton, PlaceDetailSkeleton, ProfileSkeleton,
   RouteSkeleton, ReviewSkeleton, ReportSkeleton, ForBusinessSkeleton,
   TextPageSkeleton, AdminSkeleton, ScanSkeleton, BusinessRegisterSkeleton,
-  TrailsSkeleton,
+  TrailsSkeleton, GenericPageSkeleton,
 } from './components/Skeletons'
 
 const Home             = lazy(() => import('./pages/Home'))
@@ -31,6 +31,11 @@ const ScanPage         = lazy(() => import('./pages/ScanPage'))
 const TrailsPage       = lazy(() => import('./pages/TrailsPage'))
 const TruckRouter      = lazy(() => import('./pages/TruckRouter'))
 const Accountability   = lazy(() => import('./pages/Accountability'))
+const SensoryMap       = lazy(() => import('./pages/SensoryMap'))
+const SchoolsMap       = lazy(() => import('./pages/SchoolsMap'))
+const DisasterLayer    = lazy(() => import('./pages/DisasterLayer'))
+const IndoorMapPage    = lazy(() => import('./pages/IndoorMapPage'))
+const BusinessClaim    = lazy(() => import('./pages/BusinessClaim'))
 
 function S({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) {
   return <Suspense fallback={fallback}>{children}</Suspense>
@@ -78,7 +83,12 @@ export default function App() {
         <Route path="/accessibility"  element={<S fallback={<TextPageSkeleton />}><Accessibility /></S>} />
         <Route path="/councils"       element={<S fallback={<TextPageSkeleton />}><Councils /></S>} />
         <Route path="/security"        element={<S fallback={<TextPageSkeleton />}><Security /></S>} />
-        <Route path="/accountability" element={<S fallback={<TextPageSkeleton />}><Accountability /></S>} />
+        <Route path="/accountability"  element={<S fallback={<GenericPageSkeleton />}><Accountability /></S>} />
+        <Route path="/sensory"         element={<S fallback={<GenericPageSkeleton />}><SensoryMap /></S>} />
+        <Route path="/schools"         element={<S fallback={<GenericPageSkeleton />}><SchoolsMap /></S>} />
+        <Route path="/disaster"        element={<S fallback={<GenericPageSkeleton />}><DisasterLayer /></S>} />
+        <Route path="/place/:id/indoor" element={<S fallback={<GenericPageSkeleton />}><IndoorMapPage /></S>} />
+        <Route path="/claim"           element={<S fallback={<GenericPageSkeleton />}><BusinessClaim /></S>} />
         <Route path="*"               element={<NotFound />} />
       </Routes>
       </ErrorBoundary>

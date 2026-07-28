@@ -314,3 +314,17 @@ export function BusinessRegisterSkeleton() {
     </div>
   )
 }
+
+export function GenericPageSkeleton() {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-8 space-y-4 animate-pulse">
+      <div className="h-8 w-48 rounded-lg bg-[#e8eaed]" />
+      <div className="h-4 w-full rounded-lg bg-[#e8eaed]" />
+      <div className="h-4 w-3/4 rounded-lg bg-[#e8eaed]" />
+      <div className="grid grid-cols-3 gap-3 mt-4">
+        {[...Array(3)].map((_, i) => <div key={i} className="h-20 rounded-xl bg-[#e8eaed]" />)}
+      </div>
+      {[...Array(4)].map((_, i) => <div key={i} className="h-24 rounded-xl bg-[#e8eaed]" />)}
+    </div>
+  )
+}
