@@ -30,6 +30,7 @@ const ForBusiness      = lazy(() => import('./pages/ForBusiness'))
 const ScanPage         = lazy(() => import('./pages/ScanPage'))
 const TrailsPage       = lazy(() => import('./pages/TrailsPage'))
 const TruckRouter      = lazy(() => import('./pages/TruckRouter'))
+const Accountability   = lazy(() => import('./pages/Accountability'))
 
 function S({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) {
   return <Suspense fallback={fallback}>{children}</Suspense>
@@ -76,7 +77,8 @@ export default function App() {
         <Route path="/terms"          element={<S fallback={<TextPageSkeleton />}><Terms /></S>} />
         <Route path="/accessibility"  element={<S fallback={<TextPageSkeleton />}><Accessibility /></S>} />
         <Route path="/councils"       element={<S fallback={<TextPageSkeleton />}><Councils /></S>} />
-        <Route path="/security"       element={<S fallback={<TextPageSkeleton />}><Security /></S>} />
+        <Route path="/security"        element={<S fallback={<TextPageSkeleton />}><Security /></S>} />
+        <Route path="/accountability" element={<S fallback={<TextPageSkeleton />}><Accountability /></S>} />
         <Route path="*"               element={<NotFound />} />
       </Routes>
       </ErrorBoundary>

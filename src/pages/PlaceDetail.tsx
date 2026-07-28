@@ -24,6 +24,8 @@ import SpecsForm from '../components/SpecsForm'
 import { fetchOsmDetails } from '../lib/osmDetails'
 import type { OsmData } from '../lib/osmDetails'
 import type { Place, Review, Alert, AccessSpecs } from '../types'
+import { checkAdaCompliance } from '../lib/adaCompliance'
+import type { AdaFlag } from '../lib/adaCompliance'
 
 function timeAgo(ms: number) {
   const d = Math.floor((Date.now() - ms) / 86400000)
@@ -60,6 +62,7 @@ export default function PlaceDetail() {
   const [showReview, setShowReview] = useState(false)
   const [showSpecsForm, setShowSpecsForm] = useState(false)
   const [breakdownOpen, setBreakdownOpen] = useState(false)
+  const [adaFlag, setAdaFlag] = useState<AdaFlag | null>(null)
   const user = useStore((s) => s.user)
   const toggleSaved = useStore((s) => s.toggleSaved)
   const needsProfile = useStore((s) => s.needsProfile)
@@ -76,6 +79,7 @@ export default function PlaceDetail() {
     const p = await getPlace(id)
     if (p) {
       setPlace(p)
+      setAdaFlag(checkAdaCompliance(p.name, p.city))
       setOsmOnlyMode(false)
       // Fetch reviews, alerts, specs in parallel
       const [revs, alts, sps] = await Promise.all([getReviews(id), getAlerts(id), getSpecs(id)])
@@ -172,6 +176,23 @@ export default function PlaceDetail() {
       {alerts.map((a) => (
         <div key={a.id} className="mb-3"><AlertBanner alert={a} onResolve={onResolve} /></div>
       ))}
+
+      {/* ── ADA accountability flag ─────────────────────────────── */}
+      {adaFlag && (
+        <div className="mb-3 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+          <ShieldAlert className="mt-0.5 shrink-0 text-amber-400" size={18} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-300">{adaFlag.flagLabel}</p>
+            <p className="mt-0.5 text-xs text-muted">{adaFlag.case.summary}</p>
+            <Link to="/accountability" className="mt-1 inline-block text-xs text-amber-400 underline underline-offset-2">
+              View ADA accountability report →
+            </Link>
+          </div>
+          {adaFlag.matchConfidence === 'exact' && (
+            <BadgeCheck size={14} className="mt-0.5 shrink-0 text-amber-400" aria-label="Confirmed match" />
+          )}
+        </div>
+      )}
 
       {/* ── Hero photo ─────────────────────────────────────────── */}
       {heroPhoto && (
