@@ -133,10 +133,10 @@ export async function fetchActiveDisasters(state?: string): Promise<DisasterDecl
 
 export const MOCK_DECLARATIONS: DisasterDeclaration[] = [
   {
-    id: 'fema-4000',
-    disasterNumber: '4000',
-    state: 'FL',
-    declarationTitle: 'HURRICANE DEMO — ACCESSIBILITY LAYER ACTIVE',
+    id: 'fema-demo-1',
+    disasterNumber: 'DEMO',
+    state: 'IL',
+    declarationTitle: 'Severe Winter Storm and Flooding — Accessibility Layer Active',
     declarationType: 'DR',
     declarationDate: Date.now() - 3 * 86400_000,
     incidentBeginDate: Date.now() - 5 * 86400_000,

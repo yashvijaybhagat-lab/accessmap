@@ -4,10 +4,10 @@ A one-page guide to what we built, how it works, and how to defend it.
 
 ## The 15-second pitch
 AccessMap is crowdsourced accessibility intelligence for the 1.3 billion people
-with disabilities. Search any place and get a four-dimension accessibility score
-(mobility, sensory, hearing, vision), live barrier alerts from official transit
-agencies, and AI-verified photo reports — and the app itself is built to the
-accessibility standard it preaches: screen-reader friendly, voice-driven, works offline.
+with disabilities. Search any place, get a 4-dimension score, see real-time
+transit outage alerts from official agencies, cross-reference DOJ settlement
+records, plan a step-free route, and go indoors — all in one app built to the
+accessibility standard it preaches.
 
 > **The hook:** *"An accessibility app that isn't accessible is a contradiction.
 > We made the product **and** the experience accessible — and we can prove it."*
@@ -15,137 +15,109 @@ accessibility standard it preaches: screen-reader friendly, voice-driven, works 
 > **The civic hook:** *"We don't just tell you where is accessible. We tell you
 > where is legally required to be accessible — and whether it actually is."*
 
+> **The infrastructure hook:** *"We open the data via API so cities, transit
+> agencies, and civic apps can build on it without rebuilding it."*
+
 ---
 
-## Standout features (what to demo)
+## 14 features — what to know about each
 
-### 1. Text-to-speech, built in
-- **What it is:** A "Read aloud" button on every place and alert, plus a
-  "Read aloud on focus" mode that speaks buttons, links and headings as you
-  move through the page.
-- **How it works:** The Web Speech API (`speechSynthesis`). A small controller
-  (`src/lib/speech.ts`) manages one shared utterance, tracks which control is
-  speaking, and reads the *accessible name* of focused elements.
-- **Why it matters:** Low-vision and low-literacy users, and anyone who can't
-  look at the screen (e.g. navigating in a wheelchair), get the information by ear.
-- **Judge Q — "Don't screen readers already do this?"** Screen readers exist but
-  many users don't run one. This gives audio support to *everyone* with zero
-  setup, and our content is structured so a real screen reader works too.
+### 1. Text-to-speech
+- **What:** "Read aloud" on every place/alert + focus-driven reading mode.
+- **How:** Web Speech API (`src/lib/speech.ts`). Reads accessible names of focused elements.
+- **Why:** Audio for everyone, zero setup — not just screen-reader users.
 
 ### 2. Voice search
-- **What it is:** A mic button in the map search bar — speak a place name instead
-  of typing. `"/"` also jumps focus to search.
-- **How it works:** Web Speech *recognition* (`src/lib/useVoiceSearch.ts`).
-  Gracefully hidden when unsupported.
-- **Why it matters:** Hands-free input for users with motor/dexterity
-  disabilities — typing on a phone can be the single hardest step.
+- **What:** Mic button in the search bar — speak a place name.
+- **How:** Web Speech recognition (`src/lib/useVoiceSearch.ts`). Gracefully hidden when unsupported.
+- **Why:** Hands-free input for motor/dexterity disabilities.
 
-### 3. Official transit agency outage alerts (NEW)
-- **What it is:** Real-time elevator and escalator outage feeds from WMATA
-  (Washington Metro) and MTA (New York) merged into the same live alert system
-  as community reports — with a blue "WMATA Official" / "MTA Official" badge.
-- **How it works:** `src/lib/transitAlerts.ts` polls
-  `api.wmata.com/Incidents.svc/json/ElevatorIncidents` and
-  `api-endpoint.mta.info/Straphangers/ElevatorStatus` every 5 minutes.
-  Results are normalized into the existing `Alert` schema and flow through
-  `subscribeAlerts()` unchanged — so the `aria-live` region, alert banner,
-  and admin queue all work with zero extra UI code.
-- **Why it matters:** A broken elevator makes a "10/10" station completely
-  inaccessible. Nobody publishes this data in a usable form — we're the
-  first map to surface it alongside community reports.
-- **Judge Q — "Can you show it live?"** Yes. Open any place near a DC or NY
-  transit station — if WMATA or MTA has an active outage, it appears with the
-  blue badge. Mock outages (Farragut North, Grand Central, Jay St) show by
-  default so the feature is demoable anywhere.
+### 3. Official transit agency outage alerts
+- **What:** Real-time WMATA + MTA elevator/escalator outages merged into the live alert feed with a blue "WMATA Official" / "MTA Official" badge.
+- **How:** `src/lib/transitAlerts.ts` polls both APIs every 5 min. Results flow through the existing `Alert` schema — `aria-live`, AlertBanner, and admin queue all work with zero extra UI code.
+- **Demo:** Open any place near a DC/NY station. Mock outages (Farragut North, Grand Central, Jay St) show by default.
+- **Judge Q:** *"Can you show it live?"* Yes — active WMATA outages appear with the blue badge if there are any today.
 
-### 4. ADA accountability layer (NEW)
-- **What it is:** A new `/accountability` page that cross-references AccessMap
-  community reports against public DOJ ADA settlement records. When a place has
-  a settlement on file, its detail page shows an amber warning banner: *"ADA
-  Settlement — Physical Access (2022) — Settlement required improved elevator
-  reliability..."*
-- **How it works:** `src/lib/adaCompliance.ts` holds a curated dataset of public
-  DOJ cases (source: ada.gov/cases) and runs a token-overlap name+city match
-  against every place the user opens. Match confidence is `exact` or `likely`.
-- **Why it matters:** These businesses are *legally required* to be accessible.
-  Community reports show whether they actually are. The delta between legal
-  obligation and real-world experience is the accountability gap — and we surface it.
-- **Judge Q — "Isn't this just a list?"** No — it's a cross-reference engine.
-  The value is the match: community score 3/10 + DOJ settlement = that business
-  is breaking the law right now. That's actionable in a way a list never is.
+### 4. ADA accountability layer
+- **What:** Cross-references community reports against public DOJ ADA settlements. Places with a case on file show an amber banner on their detail page.
+- **How:** `src/lib/adaCompliance.ts` — 10-case curated dataset from ada.gov/cases, token-overlap name+city matching.
+- **Demo:** Open Grand Central → amber ADA Settlement banner (2022 case).
+- **Judge Q:** *"Isn't this just a list?"* No — the value is the match: mobility score 3/10 + DOJ settlement = that business is breaking the law right now.
 
-### 5. Live updates (real-time)
-- **What it is:** New reviews and barrier alerts appear instantly — no refresh —
-  with a pulsing **LIVE** indicator and self-updating "2m ago" timestamps.
-- **How it works:** Firestore `onSnapshot` when a backend is configured; a local
-  pub/sub with **cross-tab `storage` sync** otherwise (`src/lib/data.ts`).
-  New alerts are announced to screen readers via an `aria-live` region.
-- **Why it matters:** Accessibility is *dynamic* — a broken lift makes a "10/10"
-  place unusable today. Static data lies; live data is the whole point.
+### 5. Sensory accessibility dimension
+- **What:** `/sensory` — noise, lighting, crowd density, and scent scoring for autism and sensory processing disorder.
+- **How:** `src/lib/sensory.ts`. SensoryProfile → 0–10 score. 3 places pre-loaded with mock data.
+- **Why:** Huge underserved population with nowhere to look this up. We're the first map to surface it.
+- **Demo:** Navigate to `/sensory` → Grand Central shows noise level 4/5, crowded, bright lighting.
 
-### 6. Works offline (PWA)
-- **What it is:** Installable app that keeps working with no signal — your saved
-  places and visited map tiles stay available, and a banner tells you you're offline.
-- **How it works:** A service worker (`public/sw.js`): network-first for pages,
-  stale-while-revalidate for assets, cache-first for map tiles. The data layer
-  caches the last successful fetch to localStorage (`src/lib/data.ts`).
-- **Why it matters:** People check accessibility *on the move* — transit dead
-  zones, basements, rural areas. The moment you most need it is often offline.
+### 6. School accessibility mapper
+- **What:** `/schools` — IDEA/OCR compliance findings for major districts. Parents can see which school districts are under federal finding before enrolling a disabled child.
+- **How:** `src/lib/ideaCompliance.ts` — 8-district curated dataset from OSEP + OCR records.
+- **Demo:** Navigate to `/schools` → filter by "Physical Access" → LAUSD, NYC DOE, Boston appear.
+- **Judge Q:** *"Congressional angle?"* IDEA is federal law enforced by Congress. This directly surfaces federal non-compliance in education.
 
-### 7. The map is accessible (most apps fail here)
-- **What it is:** Leaflet pins are invisible to screen readers by default. We add
-  a screen-reader-only **list of every place on the map** (name + score + alert
-  status, as links), keyboard-focusable labelled markers, and live result-count
-  announcements.
-- **Why it matters:** This is the #1 silent accessibility failure in mapping apps.
-  We fixed the thing everyone else ships broken.
+### 7. Disaster accessibility layer
+- **What:** `/disaster` — live FEMA disaster declarations + verified accessible emergency shelters with backup power, medical staff, and ASL interpreter status.
+- **How:** `src/lib/disaster.ts` polls `fema.gov/api/open/v2/disasterDeclarationsSummaries`. 3 verified shelters (Chicago, NYC, DC) pre-loaded.
+- **Demo:** Navigate to `/disaster` → shows active mock declaration + 3 accessible shelters with accessibility details.
+- **Why:** Disabled people are disproportionately killed in disasters because evacuation routes and shelters aren't built for them.
 
-### 8. Adaptive accessibility controls
-- **What it is:** A panel for larger text, high contrast, readable font
-  (Atkinson Hyperlegible), greyscale, and **reduce motion** — saved per device.
-- **How it works:** Toggles classes on `<html>`; our WebGL (Aurora) and GSAP
-  animations actually *stop their loops* under reduced motion, not just CSS.
-- **Why it matters:** WCAG 2.2 AA compliance with real, user-controlled options —
-  vestibular-disorder users won't get sick from our hero animation.
+### 8. Indoor accessibility maps
+- **What:** `/place/:id/indoor` — crowdsourced floor-level maps showing accessible restrooms, elevators, quiet rooms, and service counters per floor.
+- **How:** `src/lib/indoorMaps.ts`. Interactive floor selector, visual grid, feature list. 4 places pre-mapped (Grand Central, Union Station, Navy Pier, Pike Place).
+- **Demo:** Open Grand Central → tap "Indoor map" → select floor, see elevator and restroom locations.
+- **Why:** Google Maps stops at the front door. We go inside.
 
-### 9. Resilience / crash protection
-- **What it is:** A React **error boundary** — one bad component shows a friendly
-  recovery screen, never a white page. Reads as `role="alert"`.
-- **Why it matters:** Judges *will* click something weird. We degrade gracefully.
+### 9. Business certification
+- **What:** `/claim` — businesses submit ADA audit reports or renovation receipts to earn a "Certified Accessible" badge. 3-tier system: self-reported → community verified → certified.
+- **Demo:** Navigate to `/claim` → select a place → check document types → submit.
+- **Why:** Gives businesses an incentive to actually improve — and gives users a trust signal beyond reviews.
+
+### 10. Open API
+- **What:** `GET /api/v1/places` and `/api/v1/places/:id` — Vercel edge functions exposing AccessMap data with CORS, filtering, and caching.
+- **How:** `api/v1/places.ts` and `api/v1/places/[id].ts`. Queryable by city, min score, limit.
+- **Demo:** `curl https://accessmap.vercel.app/api/v1/places?city=chicago` — returns JSON.
+- **Why:** Turns AccessMap into infrastructure. Cities, transit planners, and civic devs can build on our data without rebuilding it.
+
+### 11. Live updates (real-time)
+- **What:** Reviews and alerts appear instantly with pulsing LIVE indicator.
+- **How:** Firestore `onSnapshot` / local pub-sub with cross-tab `storage` sync. `aria-live` for screen readers.
+
+### 12. Offline PWA
+- **What:** Installable, works without signal. Saved places and map tiles cached.
+- **How:** Service worker (`public/sw.js`). Network-first pages, cache-first tiles.
+
+### 13. Accessible map
+- **What:** Screen-reader-only list of every place on the map. Keyboard-focusable markers.
+- **Why:** #1 silent failure in mapping apps. We fixed it.
+
+### 14. Adaptive accessibility controls
+- **What:** High contrast, larger text, Atkinson Hyperlegible, greyscale, reduce motion — saved per device.
+- **How:** Toggles `<html>` classes. WebGL and GSAP loops actually stop under reduce motion.
 
 ---
 
-## If they grill you — quick answers
+## If they grill you
 
-- **"What's your moat / why is this hard?"** Accessibility data doesn't exist in a
-  usable form. We fuse OpenStreetMap tags, community reviews, official transit
-  outage feeds, and DOJ settlement records into one normalized view — and keep it live.
-- **"How do you trust user data?"** Reviews pass a quality/profanity/spam filter
-  before publishing; photos are AI-verified before they earn a "verified" badge;
-  agency alerts are sourced directly from WMATA/MTA APIs.
-- **"Does it scale?"** Pure client + Firestore; static hosting, CDN tiles, lazy-
-  loaded routes, code-split bundles. No server to fall over.
-- **"Is the accessibility real or buzzwords?"** Run a screen reader or Lighthouse
-  on it live. Skip links, focus rings, ARIA roles, an accessible map list, and a
-  public Accessibility Statement at `/accessibility` documenting conformance.
-- **"What's the civic angle?"** `/accountability` — places with DOJ ADA settlements
-  are legally required to be accessible. We show you which ones have community
-  reports saying they're not. That's a gap between law and reality that currently
-  exists nowhere in one place.
-- **"What did you build recently?"** Real-time WMATA + MTA elevator outage feeds
-  with official agency badges, ADA accountability cross-reference engine, and the
-  `/accountability` civic dashboard — the difference between a review app and a
-  civic enforcement tool.
+- **"What's your moat?"** Accessibility data doesn't exist in a usable form anywhere. We fuse OSM, community reviews, official transit feeds, DOJ settlements, IDEA findings, and FEMA data into one normalized view. Nobody else has done this.
+- **"How do you trust user data?"** Spam/profanity filter on reviews. AI photo verification via Roboflow. Official agency alerts are sourced directly from WMATA/MTA APIs.
+- **"Does it scale?"** Pure client + Firestore. Static hosting, CDN tiles, lazy-loaded routes, code-split bundles. No server to fall over.
+- **"Is the accessibility real?"** Run Lighthouse or a screen reader live. Skip links, ARIA roles, focus rings, accessible map list, public Accessibility Statement at `/accessibility`.
+- **"What's the civic angle?"** Three separate government datasets — DOJ settlements, IDEA/OCR findings, FEMA declarations — all cross-referenced against community reports. That's accountability infrastructure.
+- **"What's the API for?"** City governments and transit agencies can pull our crowdsourced scores to inform capital planning without building their own data collection. We become the layer they build on.
 
 ---
 
-## Demo flow (2 minutes)
+## Demo flow (2.5 minutes)
 
-1. Open `/map` → **speak** a city into voice search.
-2. Open **Grand Central** → point out the amber **ADA Settlement** banner (2022 DOJ case on record).
-3. Point out the **LIVE** WMATA/MTA outage alert with blue "Official" badge.
-4. Hit **Read aloud** — the TTS reads the alert and settlement summary.
-5. Navigate to `/accountability` → show the civic dashboard, filter by "Transit Access".
-6. Toggle **Reduce motion / High contrast** in the accessibility panel.
-7. Turn off Wi-Fi → app still shows places, **offline banner** appears.
-8. Tab through with a screen reader → the map reads as a **list of places**.
+1. `/map` → **speak** "Chicago" into voice search → places appear.
+2. Open **Grand Central** → amber **ADA Settlement** banner (2022 DOJ case). Point out community mobility score 6/10 vs. legal obligation.
+3. See blue **MTA Official** outage alert with BadgeCheck badge. Hit **Read aloud** — TTS reads the whole thing.
+4. Tap **Indoor map** → floor selector → show elevator and restroom locations by floor.
+5. Back to nav → `/sensory` → Grand Central: noise 4/5, crowded, bright.
+6. `/accountability` → filter "Transit Access" → civic dashboard.
+7. `/schools` → filter "Physical Access" → LAUSD, NYC DOE flagged.
+8. `/disaster` → active declaration → 3 accessible shelters with backup power / ASL badges.
+9. `/api/v1/places?city=chicago` in browser — raw JSON response.
+10. Toggle **Reduce motion / High contrast** in accessibility panel.
+11. Turn off Wi-Fi → offline banner, app still works.
