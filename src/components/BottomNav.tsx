@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { Map as MapIcon, Route as RouteIcon, Flag, Star, Truck } from 'lucide-react'
+import { Map as MapIcon, Route as RouteIcon, Flag, Star, Scale } from 'lucide-react'
 
 const links = [
-  { to: '/map',           label: 'Map',    icon: MapIcon    },
-  { to: '/route',         label: 'Route',  icon: RouteIcon  },
-  { to: '/truck',         label: 'Truck',  icon: Truck      },
-  { to: '/report',        label: 'Report', icon: Flag       },
-  { to: '/submit-review', label: 'Review', icon: Star       },
+  { to: '/map',            label: 'Map',    icon: MapIcon   },
+  { to: '/route',          label: 'Route',  icon: RouteIcon },
+  { to: '/report',         label: 'Report', icon: Flag      },
+  { to: '/submit-review',  label: 'Review', icon: Star      },
+  { to: '/accountability', label: 'ADA',    icon: Scale     },
 ]
 
 export default function BottomNav() {
