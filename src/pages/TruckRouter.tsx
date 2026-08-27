@@ -196,6 +196,59 @@ function restrictionViolates(r: Restriction, specs: TruckSpecs): string[] {
   return issues
 }
 
+// ─── Geolocation with IP fallback ────────────────────────────────────────────
+// GPS (getCurrentPosition) often times out on desktops with no GPS hardware, so
+// fall back to IP-based location — races 3 free, key-free services.
+async function ipCoords(): Promise<[number, number] | null> {
+  const to = (ms: number) => new Promise<never>((_, rej) => setTimeout(() => rej(new Error('t')), ms))
+  const attempt = async (fn: () => Promise<[number, number] | null>) => {
+    const c = await fn(); if (!c) throw new Error('no coords'); return c
+  }
+  try {
+    return await Promise.any([
+      attempt(async () => {
+        const d: any = await Promise.race([fetch('https://get.geojs.io/v1/ip/geo.json').then(r => r.json()), to(4000)])
+        const lat = parseFloat(d.latitude), lng = parseFloat(d.longitude)
+        return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] as [number, number] : null
+      }),
+      attempt(async () => {
+        const d: any = await Promise.race([fetch('https://ipwho.is/').then(r => r.json()), to(4000)])
+        return (d.success && d.latitude && d.longitude) ? [d.latitude, d.longitude] as [number, number] : null
+      }),
+      attempt(async () => {
+        const d: any = await Promise.race([fetch('https://geolocation-db.com/json/').then(r => r.json()), to(4000)])
+        return (d.latitude && d.longitude && d.latitude !== 'Not found') ? [+d.latitude, +d.longitude] as [number, number] : null
+      }),
+    ])
+  } catch { return null }
+}
+
+// Distance in metres from a point to the nearest segment of the route polyline.
+// Used to keep only the bridge/weight restrictions that actually lie on the route
+// (Overpass returns every restriction in the bounding box, not just the corridor).
+function metresToRoute(lat: number, lng: number, route: [number, number][]): number {
+  if (route.length === 0) return Infinity
+  const mPerLat = 111320
+  const mPerLng = 111320 * Math.cos((lat * Math.PI) / 180)
+  const px = lng * mPerLng, py = lat * mPerLat
+  let min = Infinity
+  for (let i = 0; i < route.length - 1; i++) {
+    const ax = route[i][1] * mPerLng, ay = route[i][0] * mPerLat
+    const bx = route[i + 1][1] * mPerLng, by = route[i + 1][0] * mPerLat
+    const dx = bx - ax, dy = by - ay
+    const len2 = dx * dx + dy * dy
+    let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0
+    t = Math.max(0, Math.min(1, t))
+    const cx = ax + t * dx, cy = ay + t * dy
+    const d = Math.hypot(px - cx, py - cy)
+    if (d < min) min = d
+  }
+  return min
+}
+
+// Only flag restrictions within this many metres of the route centreline.
+const ROUTE_CORRIDOR_M = 150
+
 // ─── Dot marker ──────────────────────────────────────────────────────────────
 
 const dot = (color: string) =>
@@ -236,18 +289,30 @@ function GeoInput({ label, value, color, onPick, onClear }: {
   }, [q, value?.shortName])
 
   function useMyLocation() {
-    setErr('')
-    if (!navigator.geolocation) { setErr('Geolocation not available.'); return }
-    setGeoBusy(true)
+    setErr(''); setGeoBusy(true)
+    let settled = false
+    const done = async (lat: number, lng: number) => {
+      if (settled) return
+      settled = true
+      const g = await reverseGeocode(lat, lng)
+      g.shortName = 'My location'
+      onPick(g); setQ('My location'); setResults([]); setGeoBusy(false)
+    }
+    const ipFallback = async () => {
+      if (settled) return
+      const c = await ipCoords()
+      if (settled) return
+      if (c) done(c[0], c[1])
+      else { settled = true; setGeoBusy(false); setErr('Location unavailable — type an address instead.') }
+    }
+    if (!navigator.geolocation) { ipFallback(); return }
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const g = await reverseGeocode(pos.coords.latitude, pos.coords.longitude)
-        g.shortName = 'My location'
-        onPick(g); setQ('My location'); setResults([]); setGeoBusy(false)
-      },
-      () => { setGeoBusy(false); setErr('Location blocked — type an address instead.') },
-      { enableHighAccuracy: true, timeout: 8000 },
+      (pos) => done(pos.coords.latitude, pos.coords.longitude),
+      () => ipFallback(),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
+    // Desktop safety net: if GPS is slow/unresponsive, use IP location after 4.5s
+    setTimeout(() => { if (!settled) ipFallback() }, 4500)
   }
 
   return (
@@ -357,12 +422,23 @@ export default function TruckRouter() {
       else setEnd(g)
     })
 
+    const seedStart = async (lat: number, lng: number) => {
+      const g = await reverseGeocode(lat, lng)
+      g.shortName = 'My location'
+      setStart((prev) => prev ?? g)
+    }
+    const seedFromIP = async () => {
+      const c = await ipCoords()
+      if (c) seedStart(c[0], c[1])
+    }
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        const g = await reverseGeocode(pos.coords.latitude, pos.coords.longitude)
-        g.shortName = 'My location'
-        setStart((prev) => prev ?? g)
-      }, () => {}, { enableHighAccuracy: false, timeout: 6000 })
+      navigator.geolocation.getCurrentPosition(
+        (pos) => seedStart(pos.coords.latitude, pos.coords.longitude),
+        () => seedFromIP(),
+        { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 },
+      )
+    } else {
+      seedFromIP()
     }
 
     return () => { map.remove(); mapRef.current = null }
@@ -408,7 +484,10 @@ export default function TruckRouter() {
       // Now fetch restrictions along the route
       setCheckingRestrictions(true)
       try {
-        const rlist = await fetchRestrictions(bounds)
+        const all = await fetchRestrictions(bounds)
+        // Keep only restrictions that actually lie along the route corridor —
+        // Overpass returns everything in the bounding box, which buries the route.
+        const rlist = all.filter(r => metresToRoute(r.lat, r.lng, coords) <= ROUTE_CORRIDOR_M)
         setRestrictions(rlist)
 
         // Check which violate the truck specs
