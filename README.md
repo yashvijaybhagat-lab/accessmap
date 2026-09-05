@@ -52,14 +52,6 @@ staggered lists — all defined in `tailwind.config.js`.
    photo verification (otherwise a deterministic demo verifier is used).
 6. To grant admin: set `role: "admin"` on the user's `users/{uid}` document.
 
-## Deploy (Vercel)
-1. Push this repo to GitHub.
-2. On [vercel.com](https://vercel.com) → **Add New → Project** → import the repo.
-3. Framework preset: **Vite** (auto-detected). Build: `npm run build`, Output: `dist`.
-4. Add the `VITE_*` env vars from `.env.example` (optional — the app runs on mock data without them).
-5. Deploy. `vercel.json` rewrites all routes to `index.html` so React Router deep links work.
-6. **Custom domain:** Project → **Settings → Domains** → add your domain and follow the DNS records Vercel shows.
-
 ## Key components
 `MapPin` · `ScoreRing` · `AlertBanner` · `AccessibilityFilter` · `PhotoUpload`
 · `PlaceCard` · `MapView` · `ReviewForm` · `ReportForm` · `Modal`.
