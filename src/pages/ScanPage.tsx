@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Camera, Upload, RotateCcw, CheckCircle2, AlertCircle, Loader2,
   Ruler, Info, MapPin, Search, X, Link2, ExternalLink,
@@ -626,9 +627,9 @@ export default function ScanPage() {
               </p>
             </div>
             {savedPlace && (
-              <a href={`/place/${savedPlace.id}`} className="btn-primary gap-2">
+              <Link to={`/place/${savedPlace.id}`} className="btn-primary gap-2">
                 <ExternalLink size={14} /> View place details
-              </a>
+              </Link>
             )}
             <button onClick={reset} className="text-sm text-muted hover:text-ink underline">
               Scan another photo

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Mountain, Loader2, LocateFixed, X, Filter, Clock, Ruler, ChevronRight, ChevronDown, ChevronUp, Accessibility, Navigation2, AlertTriangle, Bike, List } from 'lucide-react'
-import Navbar from '../components/Navbar'
 import { getNearbyTrails, DIFFICULTY_META, SURFACE_LABEL, type Trail, type TrailDifficulty, type TrailType } from '../lib/trails'
 import { haversineKm } from '../lib/overpass'
 import 'leaflet/dist/leaflet.css'
@@ -274,8 +273,6 @@ export default function TrailsPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg">
-      <Navbar />
-
       <div
         id="main-content"
         className="relative flex flex-1 overflow-hidden"

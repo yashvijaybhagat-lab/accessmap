@@ -3,12 +3,28 @@ import { getAuthInstance, getDb, FIREBASE_ENABLED } from '../lib/firebase'
 import type { AppUser, FilterKey, NeedsProfile } from '../types'
 import { DEFAULT_PROFILE } from '../lib/compatibility'
 
+/** A place chosen in the search overlay that the map should fly to. */
+export interface MapTarget {
+  lat: number
+  lng: number
+  zoom?: number
+  label?: string
+}
+
 interface AppState {
   user: AppUser | null
   authReady: boolean
   filters: Set<FilterKey>
   easyMode: boolean
   needsProfile: NeedsProfile
+  // ── App-shell UI state (persistent chrome) ──────────────────────────────
+  menuOpen: boolean
+  searchOpen: boolean
+  mapTarget: MapTarget | null
+  setMenuOpen: (v: boolean) => void
+  setSearchOpen: (v: boolean) => void
+  flyTo: (t: MapTarget) => void
+  clearMapTarget: () => void
   toggleFilter: (f: FilterKey) => void
   clearFilters: () => void
   toggleSaved: (placeId: string) => void
@@ -35,6 +51,14 @@ export const useStore = create<AppState>((set, get) => ({
   filters: new Set(),
   easyMode: (() => { const v = loadEasyMode(); applyEasyMode(v); return v })(),
   needsProfile: (() => { try { const r = localStorage.getItem('am.needs'); return r ? JSON.parse(r) : DEFAULT_PROFILE } catch { return DEFAULT_PROFILE } })(),
+
+  menuOpen: false,
+  searchOpen: false,
+  mapTarget: null,
+  setMenuOpen: (v) => set({ menuOpen: v }),
+  setSearchOpen: (v) => set({ searchOpen: v }),
+  flyTo: (t) => set({ mapTarget: t, searchOpen: false }),
+  clearMapTarget: () => set({ mapTarget: null }),
 
   setNeedsProfile: (p) => {
     try { localStorage.setItem('am.needs', JSON.stringify(p)) } catch { /* */ }

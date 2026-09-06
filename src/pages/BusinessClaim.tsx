@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Building2, Upload, CheckCircle2, ShieldCheck, FileText, Star } from 'lucide-react'
 import Layout from '../components/Layout'
 import { getPlaces } from '../lib/data'
@@ -124,7 +125,7 @@ export default function BusinessClaim() {
             </label>
             <p className="text-xs text-muted">
               Don't see your business?{' '}
-              <a href="/for-business" className="text-primary underline">Register it first →</a>
+              <Link to="/for-business" className="text-primary underline">Register it first →</Link>
             </p>
             <button
               className="btn-primary w-full"

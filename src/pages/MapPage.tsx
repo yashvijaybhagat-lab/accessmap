@@ -6,9 +6,10 @@ import {
   Navigation2, ChevronRight, ChevronDown, Car, ArrowUpDown, Zap, Clock, Info, CheckCircle2,
   Eye, Ear, Brain, TrainFront, Footprints,
 } from 'lucide-react'
-import Navbar from '../components/Navbar'
 import BrandPin from '../components/MapPin'
 import MapView from '../components/MapView'
+import BottomSheet from '../components/BottomSheet'
+import PlaceSheet, { type Selected } from '../components/PlaceSheet'
 import { scoreColor } from '../components/ScoreRing'
 import { getPlaces, getAlerts } from '../lib/data'
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
@@ -90,6 +91,11 @@ export default function MapPage() {
   const [locToast, setLocToast] = useState<{ msg: string; type: 'info' | 'error' } | null>(null)
   const needsProfile = useStore((s) => s.needsProfile)
   const profileActive = hasProfile(needsProfile)
+  const mapTarget = useStore((s) => s.mapTarget)
+  const clearMapTarget = useStore((s) => s.clearMapTarget)
+
+  // Pin-tap bottom sheet
+  const [selected, setSelected] = useState<Selected | null>(null)
   const [expandedBreakdowns, setExpandedBreakdowns] = useState<Set<string>>(new Set())
   function toggleBreakdown(id: string) {
     setExpandedBreakdowns(prev => {
@@ -126,6 +132,14 @@ export default function MapPage() {
     Promise.all([getPlaces(), getAlerts()]).then(([p, a]) => { setPlaces(p); setAlerts(a) })
     locateSilent()
   }, [])
+
+  // Search overlay picked a place → fly the map there.
+  useEffect(() => {
+    if (!mapTarget) return
+    setCenter([mapTarget.lat, mapTarget.lng])
+    setFocus({ lat: mapTarget.lat, lng: mapTarget.lng, zoom: mapTarget.zoom ?? 15 })
+    clearMapTarget()
+  }, [mapTarget, clearMapTarget])
 
   useEffect(() => () => {
     if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current)
@@ -314,7 +328,14 @@ export default function MapPage() {
   }
 
   const onCenterChange = useCallback((lat: number, lng: number) => { centerRef.current = [lat, lng] }, [])
-  const onMapSelect = useCallback((p: Place) => setFocus({ lat: p.lat, lng: p.lng, zoom: 16 }), [])
+  const onMapSelect = useCallback((p: Place) => {
+    setFocus({ lat: p.lat, lng: p.lng, zoom: 16 })
+    setSelected({ kind: 'place', data: p })
+  }, [])
+  const onPoiSelect = useCallback((p: Poi) => {
+    setFocus({ lat: p.lat, lng: p.lng, zoom: 16 })
+    setSelected({ kind: 'poi', data: p })
+  }, [])
 
   function currentCenter(): [number, number] | null {
     if (userLoc) return [userLoc.lat, userLoc.lng]
@@ -389,11 +410,10 @@ export default function MapPage() {
   const activeCatMeta = CATEGORIES.find((c) => c.key === activeCat)
 
   return (
-    <div className="relative h-screen overflow-hidden bg-[#e8eaed]">
-      <Navbar />
+    <div className="fixed inset-0 overflow-hidden bg-[#e8eaed]">
 
-      {/* Map fills everything below nav */}
-      <div id="main-content" className="absolute inset-0" style={{ paddingTop: 'var(--app-header-h, 64px)' }}>
+      {/* Full-bleed map — sits behind the floating top bar */}
+      <div id="main-content" className="absolute inset-0">
         <MapView
           places={visiblePlaces}
           pois={sortedPois}
@@ -402,14 +422,31 @@ export default function MapPage() {
           focus={focus}
           onCenterChange={onCenterChange}
           onSelect={onMapSelect}
+          onPoiSelect={onPoiSelect}
           transitLines={transitLines}
           transitStations={transitStations}
           walkingPaths={walkingPaths}
         />
       </div>
 
-      {/* Transit + Walking overlay toggles — bottom right */}
-      <div className="absolute bottom-10 right-3 z-[700] flex flex-col gap-1.5">
+      {/* Locate-me FAB — floats over the map, clear of the bottom nav */}
+      <button
+        onClick={() => locateExplicit()}
+        aria-label="Use my current location"
+        disabled={locating}
+        className="absolute right-3 z-[700] flex h-12 w-12 items-center justify-center rounded-full bg-white text-primary shadow-[0_2px_14px_rgba(0,0,0,0.22)] disabled:opacity-60"
+        style={{ bottom: 'calc(3.25rem + env(safe-area-inset-bottom) + 7.5rem)' }}
+      >
+        {locating
+          ? <Loader2 size={20} className="animate-spin" aria-hidden="true" />
+          : <LocateFixed size={20} aria-hidden="true" />}
+      </button>
+
+      {/* Transit + Walking overlay toggles — bottom right, above the bottom nav */}
+      <div
+        className="absolute right-3 z-[700] flex flex-col gap-1.5"
+        style={{ bottom: 'calc(3.25rem + env(safe-area-inset-bottom) + 1rem)' }}
+      >
         <button
           onClick={toggleTransit}
           aria-pressed={showTransit}
@@ -442,87 +479,19 @@ export default function MapPage() {
         </button>
       </div>
 
-      {/* OSM attribution */}
-      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
-        className="absolute bottom-2 right-2 z-[700] rounded-md bg-white/90 px-2 py-0.5 text-[10px] text-[#6b7280] shadow-sm hover:text-[#111827]">
-        © OpenStreetMap contributors
-      </a>
-
-      {/* ── Left panel ───────────────────────────────────────────── */}
+      {/* ── Left panel — floats below the top bar ─────────────────── */}
       <div
         role="region"
-        aria-label="Search and filter panel"
-        className="pointer-events-none absolute left-0 bottom-0 z-[800] flex w-full flex-col gap-2.5 px-3 pb-4 pt-3 sm:w-[25rem]"
-        style={{ top: 'var(--app-header-h, 64px)' }}
+        aria-label="Filter panel"
+        className="pointer-events-none absolute left-0 z-[800] flex w-full flex-col gap-2.5 px-3 pt-2 sm:w-[25rem]"
+        style={{
+          top: 'calc(var(--app-header-h, 56px) + 0.25rem)',
+          bottom: 'calc(3.25rem + env(safe-area-inset-bottom))',
+        }}
       >
 
-        {/* Search bar */}
+        {/* Location toast (search now lives in the top-bar overlay) */}
         <div className="pointer-events-auto shrink-0">
-          <div
-            role="search"
-            className="flex items-center gap-2 rounded-2xl bg-white px-3.5 py-1 shadow-[0_2px_12px_rgba(0,0,0,0.15)]"
-          >
-            <Search size={17} className="shrink-0 text-[#9aa0a6]" aria-hidden="true" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search places, buildings, addresses…"
-              aria-label="Search for accessible places"
-              aria-autocomplete="list"
-              aria-controls="search-results"
-              aria-expanded={results.length > 0}
-              className="min-w-0 flex-1 bg-transparent py-2.5 text-[15px] text-[#202124] outline-none placeholder:text-[#9aa0a6]"
-            />
-            {searching && <Loader2 size={15} className="shrink-0 animate-spin text-primary" aria-label="Searching…" />}
-            {q && !searching && (
-              <button
-                onClick={() => { setQ(''); setResults([]) }}
-                aria-label="Clear search"
-                className="shrink-0 rounded-full p-1 text-[#9aa0a6] hover:bg-[#f1f3f4] hover:text-[#202124]"
-              >
-                <X size={15} aria-hidden="true" />
-              </button>
-            )}
-            <div className="h-5 w-px shrink-0 bg-[#dadce0]" aria-hidden="true" />
-            <button
-              onClick={() => locateExplicit()}
-              aria-label="Use my current location"
-              disabled={locating}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
-            >
-              {locating
-                ? <Loader2 size={17} className="animate-spin" aria-hidden="true" />
-                : <LocateFixed size={17} aria-hidden="true" />}
-            </button>
-          </div>
-
-          {/* Search results dropdown */}
-          {results.length > 0 && (
-            <div
-              id="search-results"
-              role="listbox"
-              aria-label="Search results"
-              className="mt-1.5 overflow-hidden rounded-2xl bg-white shadow-[0_4px_20px_rgba(0,0,0,0.14)]"
-            >
-              {results.map((r, i) => (
-                <button
-                  key={r.osmId + i}
-                  role="option"
-                  onClick={() => pickResult(r)}
-                  className="flex w-full items-center gap-3 border-b border-[#f1f3f4] px-4 py-3 text-left last:border-0 hover:bg-[#f8f9fa]"
-                >
-                  <MapPinIcon size={15} className="shrink-0 text-[#9aa0a6]" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#202124]">{r.shortName}</p>
-                    <p className="truncate text-xs text-[#6b7280]">{r.displayName}</p>
-                  </div>
-                  <ChevronRight size={14} className="ml-auto shrink-0 text-[#9aa0a6]" aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Location toast */}
           {locToast && (
             <div
               role="status"
@@ -813,12 +782,12 @@ export default function MapPage() {
 
                       {/* Actions */}
                       <div className="mt-3 flex items-center gap-2">
-                        <a
-                          href={`/place/${p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 transition-colors"
+                        <Link
+                          to={`/place/${p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}`}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 transition-colors"
                         >
                           Full details →
-                        </a>
+                        </Link>
                         <a
                           href={`https://www.openstreetmap.org/${p.osmId}`}
                           target="_blank"
@@ -839,7 +808,10 @@ export default function MapPage() {
 
       {/* Bottom legend (desktop only, when no panel open) */}
       {showA11y && !panelOpen && (
-        <div className="absolute bottom-6 left-4 z-[700] hidden items-center gap-3 rounded-full bg-white/95 px-4 py-2 text-xs text-[#6b7280] shadow-[0_2px_8px_rgba(0,0,0,0.12)] sm:flex">
+        <div
+          className="absolute left-4 z-[700] hidden items-center gap-3 rounded-full bg-white/95 px-4 py-2 text-xs text-[#6b7280] shadow-[0_2px_8px_rgba(0,0,0,0.12)] sm:flex"
+          style={{ bottom: 'calc(3.25rem + env(safe-area-inset-bottom) + 1rem)' }}
+        >
           <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#f5b50a]" aria-hidden="true" /> Sponsored</span>
           <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#0ABFBF]" aria-hidden="true" /> Accessible</span>
           <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#f9ab00]" aria-hidden="true" /> Alert</span>
@@ -849,21 +821,20 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* Welcome overlay */}
-      {showIntro && (
-        <div
-          className="fixed inset-0 z-[950] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="intro-title"
-        >
-          <div ref={introTrapRef} className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl">
+      {/* Pin-tap place details — slides up from the bottom */}
+      <BottomSheet open={!!selected} onClose={() => setSelected(null)} showHeader={false}>
+        {selected && <PlaceSheet selected={selected} onClose={() => setSelected(null)} />}
+      </BottomSheet>
+
+      {/* Welcome sheet (first visit) */}
+      <BottomSheet open={showIntro} onClose={dismissIntro} showHeader={false}>
+        <div>
             {/* Header */}
             <div className="bg-gradient-to-br from-[#0ABFBF] to-[#1a73e8] px-7 py-7 text-center text-white">
               <div className="mx-auto mb-3 flex justify-center">
                 <BrandPin size={56} />
               </div>
-              <h2 id="intro-title" className="text-2xl font-bold">Welcome to AccessMap</h2>
+              <h2 className="text-2xl font-bold">Welcome to AccessMap</h2>
               <p className="mt-1 text-sm text-white/85">Crowdsourced accessibility intelligence</p>
             </div>
 
@@ -907,14 +878,13 @@ export default function MapPage() {
 
               <p className="mt-4 text-center text-[11px] leading-relaxed text-[#9aa0a6]">
                 By continuing you agree to our{' '}
-                <a href="/terms" className="underline hover:text-primary">Terms</a> &{' '}
-                <a href="/privacy" className="underline hover:text-primary">Privacy Policy</a>.
+                <Link to="/terms" className="underline hover:text-primary">Terms</Link> &{' '}
+                <Link to="/privacy" className="underline hover:text-primary">Privacy Policy</Link>.
                 Your location is never stored without consent.
               </p>
             </div>
-          </div>
         </div>
-      )}
+      </BottomSheet>
     </div>
   )
 }

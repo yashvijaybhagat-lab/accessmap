@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { X, LogIn, Mail, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { useStore } from '../store/useStore'
 
@@ -174,7 +175,7 @@ export default function AuthModal({ open, onClose }: Props) {
           </button>
           <p className="mt-4 text-center text-xs text-muted">
             We'll never post to Google or share your data. See our{' '}
-            <a href="/privacy" className="underline hover:text-ink">Privacy Policy</a>.
+            <Link to="/privacy" onClick={onClose} className="underline hover:text-ink">Privacy Policy</Link>.
           </p>
         </div>
 

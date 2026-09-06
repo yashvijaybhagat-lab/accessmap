@@ -45,6 +45,13 @@ export default function AccessibilityPanel() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
+  // Opened from the menu drawer's "Adjust my experience" row.
+  useEffect(() => {
+    const openPanel = () => setOpen(true)
+    window.addEventListener('am:open-a11y', openPanel)
+    return () => window.removeEventListener('am:open-a11y', openPanel)
+  }, [])
+
   useEffect(() => {
     const root = document.documentElement
     root.classList.toggle('a11y-large', s.large)
@@ -63,7 +70,8 @@ export default function AccessibilityPanel() {
       <button
         onClick={() => setOpen(true)}
         aria-label="Adjust my experience"
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-4 z-[860] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-white shadow-map transition-transform hover:scale-105 sm:bottom-5 sm:left-5"
+        className="fixed left-4 z-[860] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-white shadow-map transition-transform hover:scale-105 sm:left-5"
+        style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
       >
         <Accessibility size={18} />
         <span className="hidden sm:inline">Adjust my experience</span>

@@ -7,7 +7,7 @@
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#070B18",
-  "theme_color": "#ffffff",
+  "theme_color": "#070B18",
   "categories": ["navigation", "utilities", "accessibility"],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
@@ -17,7 +17,7 @@
     { "src": "/pin.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Open the map", "url": "/map" },
+    { "name": "Open the map", "url": "/" },
     { "name": "Plan a step-free route", "url": "/route" },
     { "name": "Report a barrier", "url": "/report" }
   ]

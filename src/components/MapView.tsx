@@ -15,6 +15,7 @@ interface Props {
   userLocation?: { lat: number; lng: number } | null
   focus?: { lat: number; lng: number; zoom?: number } | null
   onSelect?: (place: Place) => void
+  onPoiSelect?: (poi: Poi) => void
   onCenterChange?: (lat: number, lng: number) => void
   className?: string
   transitLines?: TransitLine[]
@@ -89,7 +90,11 @@ function stationIcon(type: TransitStation['type']) {
   })
 }
 
-function MapView({ places, pois = [], alertPlaceIds, userLocation, focus, onSelect, onCenterChange, className, transitLines = [], transitStations = [], walkingPaths = [] }: Props) {
+function MapView({ places, pois = [], alertPlaceIds, userLocation, focus, onSelect, onPoiSelect, onCenterChange, className, transitLines = [], transitStations = [], walkingPaths = [] }: Props) {
+  const onSelectRef = useRef(onSelect)
+  onSelectRef.current = onSelect
+  const onPoiSelectRef = useRef(onPoiSelect)
+  onPoiSelectRef.current = onPoiSelect
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const placeLayer = useRef<L.LayerGroup | null>(null)
@@ -147,14 +152,11 @@ function MapView({ places, pois = [], alertPlaceIds, userLocation, focus, onSele
         alt: `${p.name}, accessibility score ${avgScore.toFixed(1)} of 10${alertPlaceIds.has(p.id) ? ', active alert' : ''}`,
       })
       m.bindTooltip(p.name, { direction: 'top', offset: [0, -30], className: 'am-tooltip' })
-      const avg = (p.scores.mobility + p.scores.sensory + p.scores.hearing + p.scores.vision) / 4
-      const avgColor = avg >= 7 ? '#1e8e3e' : avg >= 5 ? '#f29900' : '#ea4335'
-      const scoreHtml = `<span style="background:${avgColor};color:#fff;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600">♿ ${avg.toFixed(1)}/10</span>`
-      m.bindPopup(popupHtml(p.name, p.address, scoreHtml, '', p.lat, p.lng, `/place/${p.id}`), { maxWidth: 280 })
-      m.on('click', () => onSelect?.(p))
+      // Tapping a pin opens a bottom sheet (handled by the page), not a Leaflet popup.
+      m.on('click', () => onSelectRef.current?.(p))
       m.addTo(layer)
     })
-  }, [places, alertPlaceIds, onSelect])
+  }, [places, alertPlaceIds])
 
   useEffect(() => {
     const layer = poiLayer.current
@@ -169,14 +171,8 @@ function MapView({ places, pois = [], alertPlaceIds, userLocation, focus, onSele
         title: p.name,
         alt: `${p.name}${p.accessScore != null ? `, accessibility score ${p.accessScore} of 10` : ', accessibility not rated'}`,
       })
-      const scoreHtml = p.accessScore != null
-        ? `<span style="background:${c};color:#fff;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600">♿ ${p.accessScore}/10</span>`
-        : `<span style="background:#f3f4f6;color:#6b7280;border-radius:999px;padding:2px 9px;font-size:11px">Unrated</span>`
-      const terrainHtml = p.terrain !== 'Unknown'
-        ? `<span style="background:#f3f4f6;color:#374151;border-radius:999px;padding:2px 9px;font-size:11px">⛰ ${p.terrain}</span>`
-        : ''
-      const poiDetailHref = `/place/${p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}`
-      m.bindPopup(popupHtml(p.name, p.address, scoreHtml, terrainHtml, p.lat, p.lng, poiDetailHref), { maxWidth: 280 })
+      m.bindTooltip(p.name, { direction: 'top', offset: [0, -30], className: 'am-tooltip' })
+      m.on('click', () => onPoiSelectRef.current?.(p))
       m.addTo(layer)
     })
   }, [pois])

@@ -11,11 +11,12 @@
 html, body, #root { height: 100%; }
 
 /* ── Mobile safe areas (standalone PWA, viewport-fit=cover) ───────────────── */
-/* Clear the bottom nav + iOS home indicator on phone widths. Desktop is
-   untouched — the bottom nav is hidden there and the env() insets are 0. */
-@media (max-width: 639px) {
-  #main-content { padding-bottom: calc(3.5rem + env(safe-area-inset-bottom)); }
-}
+/* The app shell handles left/right/top insets; each non-map page (Layout)
+   sets its own bottom padding to clear the always-visible bottom nav. */
+.app-shell { min-height: 100%; }
+
+/* Keep Leaflet's zoom + attribution controls above the bottom nav bar. */
+.leaflet-bottom { margin-bottom: calc(3.25rem + env(safe-area-inset-bottom)); }
 
 body {
   margin: 0;

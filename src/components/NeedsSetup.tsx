@@ -13,7 +13,7 @@ interface Props { onClose: () => void }
 type Step = 'name' | 'mobility' | 'hearing' | 'vision' | 'sensory' | 'features' | 'done'
 const STEPS: Step[] = ['name', 'mobility', 'hearing', 'vision', 'sensory', 'features', 'done']
 
-const MOBILITY_OPTIONS = [
+export const MOBILITY_OPTIONS = [
   { value: 'none',              label: 'I walk unaided',             emoji: '🚶' },
   { value: 'cane',              label: 'I use a cane or crutches',   emoji: '🦯' },
   { value: 'manual_wheelchair', label: 'I use a manual wheelchair',  emoji: '♿' },
@@ -21,25 +21,25 @@ const MOBILITY_OPTIONS = [
   { value: 'scooter',           label: 'I use a mobility scooter',   emoji: '🛵' },
 ] as const
 
-const HEARING_OPTIONS = [
+export const HEARING_OPTIONS = [
   { value: 'none',           label: 'I have full hearing',            emoji: '👂' },
   { value: 'hard_of_hearing',label: 'I am hard of hearing',           emoji: '🔉' },
   { value: 'deaf',           label: 'I am Deaf / use sign language',  emoji: '🤟' },
 ] as const
 
-const VISION_OPTIONS = [
+export const VISION_OPTIONS = [
   { value: 'none',       label: 'I have full vision',             emoji: '👁️' },
   { value: 'low_vision', label: 'I have low vision',              emoji: '🔍' },
   { value: 'blind',      label: 'I am blind or have no usable vision', emoji: '🦮' },
 ] as const
 
-const SENSORY_OPTIONS = [
+export const SENSORY_OPTIONS = [
   { value: 'none',      label: 'No sensory sensitivities',             emoji: '😊' },
   { value: 'sensitive', label: 'Some sensory sensitivities',           emoji: '🌿' },
   { value: 'severe',    label: 'Significant sensory needs (e.g. autism)', emoji: '🔇' },
 ] as const
 
-const FEATURE_OPTIONS: [keyof NeedsProfile, string, string][] = [
+export const FEATURE_OPTIONS: [keyof NeedsProfile, string, string][] = [
   ['needsLift',             '🛗', 'Elevator or lift'],
   ['needsAccessibleToilet', '🚻', 'Accessible / wheelchair toilet'],
   ['needsHearingLoop',      '📡', 'Hearing loop / induction loop'],
