@@ -13,3 +13,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** Build/dev-server stamp injected by vite.config.ts `define`. */
+declare const __APP_SESSION__: string

@@ -9,12 +9,15 @@
  *
  * Bump CACHE_VERSION to invalidate old caches on deploy.
  */
-const CACHE_VERSION = 'am-v1'
+const CACHE_VERSION = 'am-v2'
 const SHELL_CACHE = `${CACHE_VERSION}-shell`
 const ASSET_CACHE = `${CACHE_VERSION}-assets`
 const TILE_CACHE = `${CACHE_VERSION}-tiles`
 
-const SHELL = ['/', '/index.html', '/manifest.json', '/pin.svg']
+const SHELL = [
+  '/', '/index.html', '/manifest.json', '/pin.svg',
+  '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

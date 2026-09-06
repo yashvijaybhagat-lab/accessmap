@@ -7,7 +7,11 @@ export default function Layout({ children, bare = false }: { children: ReactNode
     <div className="min-h-screen">
       <Navbar />
       {bare ? (
-        <main id="main-content" className="pb-16 sm:pb-0" style={{ paddingTop: 'var(--app-header-h, 56px)' }}>{children}</main>
+        <main
+          id="main-content"
+          className="pb-16 sm:pb-0"
+          style={{ paddingTop: 'var(--app-header-h, 56px)' }}
+        >{children}</main>
       ) : (
         <main
           id="main-content"

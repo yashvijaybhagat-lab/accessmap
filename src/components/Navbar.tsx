@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { Route as RouteIcon, Flag, Star, User, ShieldCheck, Map as MapIcon, Accessibility, UserCog, LogIn, ScanLine, Mountain, Truck, Scale, Ear, GraduationCap, AlertOctagon } from 'lucide-react'
 import MapPin from './MapPin'
@@ -23,6 +23,21 @@ export default function Navbar() {
   const [showAuth,  setShowAuth]  = useState(false)
   const profileSet = hasProfile(needsProfile)
 
+  // Publish the real header height (which grows in accessibility mode, with the
+  // banner, or when nav wraps) so fixed/absolute page content can offset by it.
+  const headerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const publish = () =>
+      document.documentElement.style.setProperty('--app-header-h', `${el.offsetHeight}px`)
+    publish()
+    const ro = new ResizeObserver(publish)
+    ro.observe(el)
+    window.addEventListener('resize', publish)
+    return () => { ro.disconnect(); window.removeEventListener('resize', publish) }
+  }, [])
+
   const links = [
     { to: '/map',           label: 'Map',    icon: MapIcon   },
     { to: '/trails',        label: 'Trails', icon: Mountain  },
@@ -42,8 +57,9 @@ export default function Navbar() {
       <a href="#main-content" className="skip-nav">Skip to main content</a>
 
       <header
+        ref={headerRef}
         className="fixed inset-x-0 top-0 z-[900] border-b border-black/5 bg-white/80 backdrop-blur-xl"
-        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.06)' }}
+        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.06)', paddingTop: 'env(safe-area-inset-top)' }}
       >
         <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6" aria-label="Main navigation">
 

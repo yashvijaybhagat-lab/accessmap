@@ -393,7 +393,7 @@ export default function MapPage() {
       <Navbar />
 
       {/* Map fills everything below nav */}
-      <div id="main-content" className="absolute inset-0 pt-16">
+      <div id="main-content" className="absolute inset-0" style={{ paddingTop: 'var(--app-header-h, 64px)' }}>
         <MapView
           places={visiblePlaces}
           pois={sortedPois}
@@ -452,7 +452,8 @@ export default function MapPage() {
       <div
         role="region"
         aria-label="Search and filter panel"
-        className="pointer-events-none absolute left-0 top-16 bottom-0 z-[800] flex w-full flex-col gap-2.5 px-3 pb-4 pt-3 sm:w-[25rem]"
+        className="pointer-events-none absolute left-0 bottom-0 z-[800] flex w-full flex-col gap-2.5 px-3 pb-4 pt-3 sm:w-[25rem]"
+        style={{ top: 'var(--app-header-h, 64px)' }}
       >
 
         {/* Search bar */}

@@ -63,7 +63,7 @@ export default function AccessibilityPanel() {
       <button
         onClick={() => setOpen(true)}
         aria-label="Adjust my experience"
-        className="fixed bottom-[72px] left-4 z-[860] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-white shadow-map transition-transform hover:scale-105 sm:bottom-5 sm:left-5"
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-4 z-[860] flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-white shadow-map transition-transform hover:scale-105 sm:bottom-5 sm:left-5"
       >
         <Accessibility size={18} />
         <span className="hidden sm:inline">Adjust my experience</span>
@@ -71,7 +71,11 @@ export default function AccessibilityPanel() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[870] flex justify-end bg-black/30" onClick={() => setOpen(false)}>
+        <div
+          className="fixed inset-x-0 bottom-0 z-[870] flex justify-end bg-black/30"
+          style={{ top: 'var(--app-header-h, 56px)' }}
+          onClick={() => setOpen(false)}
+        >
           <div
             ref={trapRef}
             className="h-full w-full max-w-sm animate-[pageIn_280ms_ease-out] overflow-y-auto bg-card p-5 shadow-2xl"

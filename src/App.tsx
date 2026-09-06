@@ -5,6 +5,7 @@ import { startAgencyAlertSync } from './lib/data'
 import AccessibilityPanel from './components/AccessibilityPanel'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionStatus from './components/ConnectionStatus'
+import InstallPrompt from './components/InstallPrompt'
 import {
   HomeSkeleton, MapSkeleton, PlaceDetailSkeleton, ProfileSkeleton,
   RouteSkeleton, ReviewSkeleton, ReportSkeleton, ForBusinessSkeleton,
@@ -94,6 +95,7 @@ export default function App() {
       </ErrorBoundary>
       <AccessibilityPanel />
       <ConnectionStatus />
+      <InstallPrompt />
     </>
   )
 }

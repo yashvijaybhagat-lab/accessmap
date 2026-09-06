@@ -13,7 +13,7 @@ export default function BottomNav() {
   return (
     <nav
       className="fixed bottom-0 inset-x-0 z-[850] flex sm:hidden bg-white/95 backdrop-blur-md border-t border-[#e8eaed]"
-      style={{ boxShadow: '0 -1px 0 #e8eaed, 0 -2px 8px rgba(60,64,67,0.08)' }}
+      style={{ boxShadow: '0 -1px 0 #e8eaed, 0 -2px 8px rgba(60,64,67,0.08)', paddingBottom: 'env(safe-area-inset-bottom)' }}
       aria-label="Mobile navigation"
     >
       {links.map(({ to, label, icon: Icon }) => (

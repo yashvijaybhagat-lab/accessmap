@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { Mountain, Loader2, LocateFixed, X, Filter, Clock, Ruler, ChevronRight, ChevronDown, ChevronUp, Accessibility, Navigation2, AlertTriangle, Bike } from 'lucide-react'
+import { Mountain, Loader2, LocateFixed, X, Filter, Clock, Ruler, ChevronRight, ChevronDown, ChevronUp, Accessibility, Navigation2, AlertTriangle, Bike, List } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import { getNearbyTrails, DIFFICULTY_META, SURFACE_LABEL, type Trail, type TrailDifficulty, type TrailType } from '../lib/trails'
 import { haversineKm } from '../lib/overpass'
@@ -148,6 +148,39 @@ export default function TrailsPage() {
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  // Sidebar sizing: draggable width on desktop, slide-over drawer on mobile.
+  const SIDEBAR_MIN = 280
+  const SIDEBAR_MAX = 560
+  const [sidebarW, setSidebarW] = useState(() => {
+    const saved = Number(localStorage.getItem('am-trails-sidebar-w'))
+    return saved >= SIDEBAR_MIN && saved <= SIDEBAR_MAX ? saved : 340
+  })
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  const draggingRef = useRef(false)
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      if (!draggingRef.current) return
+      setSidebarW(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX)))
+    }
+    function onUp() {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      try { localStorage.setItem('am-trails-sidebar-w', String(sidebarW)) } catch { /* ignore */ }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [sidebarW])
+
+  const isMobile = () =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+
   async function loadTrails(loc: [number, number]) {
     abortRef.current?.abort()
     const ac = new AbortController()
@@ -243,13 +276,22 @@ export default function TrailsPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-bg">
       <Navbar />
 
-      <div id="main-content" className="flex flex-1 overflow-hidden pt-14">
-        {/* ── Sidebar ─────────────────────────────────────────────── */}
-        <aside className="flex w-[22rem] shrink-0 flex-col overflow-hidden border-r border-border bg-white">
+      <div
+        id="main-content"
+        className="relative flex flex-1 overflow-hidden"
+        style={{ paddingTop: 'var(--app-header-h, 56px)' }}
+      >
+        {/* ── Sidebar — draggable column on desktop, slide-over drawer on mobile ── */}
+        <aside
+          className={`absolute bottom-0 left-0 z-[820] flex flex-col overflow-hidden border-r border-border bg-white shadow-2xl transition-transform duration-300 ease-out
+            sm:static sm:z-auto sm:shrink-0 sm:translate-x-0 sm:shadow-none sm:transition-none
+            ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          style={{ width: sidebarW, maxWidth: '86vw', top: 'var(--app-header-h, 56px)' }}
+        >
 
           {/* Header */}
           <div className="border-b border-border px-5 py-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h1 className="flex items-center gap-2 text-[17px] font-bold text-ink">
                   <Mountain size={18} className="text-primary" /> Trails & Paths
@@ -260,16 +302,25 @@ export default function TrailsPage() {
                     : 'Finding your location…'}
                 </p>
               </div>
-              <button
-                onClick={locate}
-                disabled={loading}
-                aria-label="Refresh nearby trails"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted hover:bg-surface hover:text-ink disabled:opacity-40"
-              >
-                {loading
-                  ? <Loader2 size={16} className="animate-spin" />
-                  : <LocateFixed size={16} />}
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  onClick={locate}
+                  disabled={loading}
+                  aria-label="Refresh nearby trails"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted hover:bg-surface hover:text-ink disabled:opacity-40"
+                >
+                  {loading
+                    ? <Loader2 size={16} className="animate-spin" />
+                    : <LocateFixed size={16} />}
+                </button>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Hide sidebar"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted hover:bg-surface hover:text-ink sm:hidden"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -439,7 +490,11 @@ export default function TrailsPage() {
             {visible.map((trail, i) => (
               <button
                 key={trail.id}
-                onClick={() => setSelected(selected?.id === trail.id ? null : trail)}
+                onClick={() => {
+                  const next = selected?.id === trail.id ? null : trail
+                  setSelected(next)
+                  if (next && isMobile()) setDrawerOpen(false)
+                }}
                 className={`w-full px-4 py-3.5 text-left transition-colors ${
                   selected?.id === trail.id ? 'bg-primary/5 border-l-2 border-primary' : 'hover:bg-[#f9fafb]'
                 }`}
@@ -480,7 +535,33 @@ export default function TrailsPage() {
               </button>
             ))}
           </div>
+
+          {/* Drag-to-resize handle (desktop) */}
+          <div
+            onPointerDown={(e) => {
+              draggingRef.current = true
+              document.body.style.cursor = 'col-resize'
+              document.body.style.userSelect = 'none'
+              e.preventDefault()
+            }}
+            onDoubleClick={() => setSidebarW(340)}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar (double-click to reset)"
+            className="absolute inset-y-0 right-0 hidden w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-primary/25 sm:block"
+          />
         </aside>
+
+        {/* Reopen the drawer (mobile, when hidden) */}
+        {!drawerOpen && (
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="absolute left-3 z-[810] flex items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-semibold text-ink shadow-lg sm:hidden"
+            style={{ top: 'calc(var(--app-header-h, 56px) + 0.5rem)' }}
+          >
+            <List size={15} /> Trails
+          </button>
+        )}
 
         {/* ── Map ──────────────────────────────────────────────────── */}
         <div className="relative flex-1">
