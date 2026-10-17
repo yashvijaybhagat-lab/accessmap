@@ -105,7 +105,7 @@ export interface Alert {
   createdAt: number
   resolvedAt?: number
   source?: 'community' | 'agency'
-  agencyId?: 'wmata' | 'mta' | 'bart'
+  agencyId?: 'wmata' | 'mta' | 'bart' | 'capmetro'
 }
 
 export interface AppUser {

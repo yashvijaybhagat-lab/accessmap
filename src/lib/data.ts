@@ -242,7 +242,13 @@ export async function getAlerts(placeId?: string, onlyActive = true): Promise<Al
 }
 
 export async function addAlert(input: Omit<Alert, 'id' | 'createdAt' | 'status'>): Promise<Alert> {
-  checkRate('report', { minGapMs: 8000, maxPerHour: 20, label: 'report' })
+  // The anti-spam rate limit is for human-submitted reports. Agency-sourced
+  // alerts come from the automated transit sync (syncAgencyAlerts), which can
+  // legitimately write several in quick succession — it's already deduplicated
+  // against what's stored, so it should never be throttled like a user report.
+  if (input.source !== 'agency') {
+    checkRate('report', { minGapMs: 8000, maxPerHour: 20, label: 'report' })
+  }
   const db = FIREBASE_ENABLED ? await getDb() : null
   if (!db) {
     const alert: Alert = { ...input, id: uid(), status: 'active', createdAt: Date.now() }
@@ -393,7 +399,19 @@ async function resolveOutagePlaceId(outage: AgencyOutage): Promise<string | null
   return match?.id ?? null
 }
 
-export async function syncAgencyAlerts(): Promise<void> {
+// Guards against overlapping runs — e.g. React StrictMode's dev-only
+// mount→unmount→mount double-invoking the effect that starts this, which
+// would otherwise race two concurrent passes against the same dedup checks
+// and write every outage twice.
+let _syncInFlight: Promise<void> | null = null
+
+export function syncAgencyAlerts(): Promise<void> {
+  if (_syncInFlight) return _syncInFlight
+  _syncInFlight = runSync().finally(() => { _syncInFlight = null })
+  return _syncInFlight
+}
+
+async function runSync(): Promise<void> {
   let outages: AgencyOutage[]
   try {
     outages = await fetchAgencyOutages()
@@ -412,7 +430,13 @@ export async function syncAgencyAlerts(): Promise<void> {
       (a) => a.source === 'agency' && a.description.includes(outage.unit),
     )
     if (alreadyStored) continue
-    await addAlert(outageToAlert(outage, placeId))
+    try {
+      await addAlert(outageToAlert(outage, placeId))
+    } catch (e) {
+      // Don't let one bad outage (or a transient write failure) abort the
+      // rest of the sync — just skip it and keep going.
+      console.warn('[AccessMap] Failed to sync agency alert:', e)
+    }
   }
 
   const allActive = await getAlerts(undefined, true)
@@ -425,10 +449,18 @@ export async function syncAgencyAlerts(): Promise<void> {
   _lastSyncedOutageIds = freshIds
 }
 
+function runAgencyAlertSync() {
+  // Defense in depth: syncAgencyAlerts already catches per-outage failures,
+  // but neither this fire-and-forget call nor setInterval's callback are
+  // awaited anywhere, so any unexpected throw would otherwise become an
+  // uncaught promise rejection in the console.
+  syncAgencyAlerts().catch((e) => console.warn('[AccessMap] Agency alert sync failed:', e))
+}
+
 export function startAgencyAlertSync(): () => void {
-  syncAgencyAlerts()
+  runAgencyAlertSync()
   if (_agencySyncTimer) clearInterval(_agencySyncTimer)
-  _agencySyncTimer = setInterval(syncAgencyAlerts, AGENCY_SYNC_INTERVAL)
+  _agencySyncTimer = setInterval(runAgencyAlertSync, AGENCY_SYNC_INTERVAL)
   return () => {
     if (_agencySyncTimer) { clearInterval(_agencySyncTimer); _agencySyncTimer = null }
   }

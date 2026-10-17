@@ -27,6 +27,7 @@ const AGENCY_LABEL: Record<NonNullable<Alert['agencyId']>, string> = {
   wmata: 'WMATA',
   mta: 'MTA',
   bart: 'BART',
+  capmetro: 'CapMetro',
 }
 
 interface Props {

@@ -203,11 +203,17 @@ export default function MapPage() {
         setFocus({ lat, lng, zoom: 15 })
         startWatch()
       },
-      async () => {
-        // GPS failed silently — try IP, no error shown
+      async (err) => {
+        // GPS failed — fall back to IP centering either way
         const c = await ipCoords()
         if (c) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
-        // If both fail, map just stays centered on [0,0] — user can search
+        // If it's specifically a blocked/denied permission, say so — this is the
+        // one case the user can actually fix, so it's worth surfacing up front
+        // rather than only when they tap "locate me".
+        if (err.code === err.PERMISSION_DENIED) {
+          showToast('Location is blocked in your browser — centering by your approximate IP location instead. Enable it in your browser’s site settings, or just search for a place.', 'info')
+        }
+        // If IP lookup also fails, the map just stays at its default view — user can search.
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 },
     )

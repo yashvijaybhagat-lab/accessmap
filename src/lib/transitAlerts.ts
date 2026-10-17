@@ -8,7 +8,7 @@ import type { Alert } from '../types'
 
 export interface AgencyOutage {
   id: string
-  agencyId: 'wmata' | 'mta' | 'bart'
+  agencyId: 'wmata' | 'mta' | 'bart' | 'capmetro'
   agencyLabel: string
   stationName: string
   unit: string
@@ -19,36 +19,42 @@ export interface AgencyOutage {
 }
 
 // ── Mock outages (shown when no API keys are set) ──────────────────────────
+// Themed to the Austin-area CapMetro MetroRail Red Line, whose northern
+// terminus runs through the Cedar Park / Lakeline area — matches the rest of
+// the demo data set. Each carries an explicit `placeId` so it attaches to one
+// of our Cedar Park placeholder businesses regardless of station-name matching.
 
 export const mockAgencyOutages: AgencyOutage[] = [
   {
-    id: 'wmata-C02-ELV-01',
-    agencyId: 'wmata',
-    agencyLabel: 'WMATA Official',
-    stationName: 'Farragut North',
-    unit: 'Elevator between street and mezzanine (Service Call)',
+    id: 'capmetro-lakeline-elv-01',
+    agencyId: 'capmetro',
+    agencyLabel: 'CapMetro Official',
+    stationName: 'Lakeline Station',
+    unit: 'Elevator — Parking garage to platform',
     outageDate: Date.now() - 2 * 3600_000,
     isElevator: true,
+    placeId: 'lakeline-mall',
   },
   {
-    id: 'mta-R16-escalator-1',
-    agencyId: 'mta',
-    agencyLabel: 'MTA Official',
-    stationName: 'Grand Central – 42 St',
-    unit: 'Escalator — Shuttle to Lexington platform',
+    id: 'capmetro-lakeline-escalator-1',
+    agencyId: 'capmetro',
+    agencyLabel: 'CapMetro Official',
+    stationName: 'Lakeline Station',
+    unit: 'Escalator — Platform to pedestrian bridge',
     outageDate: Date.now() - 6 * 3600_000,
     estimatedReturn: Date.now() + 18 * 3600_000,
     isElevator: false,
-    placeId: 'grand-central-nyc',
+    placeId: 'lakeline-mall',
   },
   {
-    id: 'mta-A27-elevator-1',
-    agencyId: 'mta',
-    agencyLabel: 'MTA Official',
-    stationName: 'Jay St – MetroTech',
-    unit: 'Elevator — Street to Mezzanine',
+    id: 'capmetro-cedarpark-elevator-1',
+    agencyId: 'capmetro',
+    agencyLabel: 'CapMetro Official',
+    stationName: 'Cedar Park Transit Center',
+    unit: 'Elevator — Street to boarding platform',
     outageDate: Date.now() - 1 * 3600_000,
     isElevator: true,
+    placeId: 'heb-center-cedarpark',
   },
 ]
 

@@ -5,7 +5,7 @@ place, see a four-dimension accessibility score, read community reviews, get liv
 issue alerts, plan step-free routes, and submit AI-verified photo reports.
 
 > **Runs out of the box.** With no Firebase keys configured, AccessMap loads
-> bundled mock data (10 places across 5 cities, reviews, live alerts) and a
+> bundled mock data (10 placeholder businesses around Cedar Park, TX, reviews, live alerts) and a
 > local demo auth so every screen and flow is explorable. Add `.env` keys to go
 > live on real Firestore + Roboflow.
 
