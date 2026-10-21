@@ -6,6 +6,17 @@
 :root {
   color-scheme: light;
   --radius: 1rem;
+  /* Palette as RGB channels — consumed by tailwind.config.js colours. */
+  --c-bg: 248 249 251;
+  --c-primary: 26 115 232;
+  --c-accent: 10 191 191;
+  --c-alert: 234 67 53;
+  --c-card: 255 255 255;
+  --c-ink: 15 17 23;
+  --c-muted: 107 114 128;
+  --c-border: 229 231 235;
+  --c-surface: 243 244 246;
+  --ts: 1; /* text scale multiplier for fixed-px text (set by data-text-scale) */
 }
 
 html, body, #root { height: 100%; }
@@ -106,6 +117,54 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .am-tooltip::before { display: none !important; }
 
+/* ── 3D map (MapLibre) ───────────────────────────────────────────────────── */
+.maplibregl-map { font-family: 'Inter', system-ui, sans-serif; background: #eef1f6; }
+.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { margin-bottom: calc(3.25rem + env(safe-area-inset-bottom)); }
+.maplibregl-ctrl-attrib { font-size: 10px; }
+.glass {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid rgba(15, 17, 23, 0.08);
+  box-shadow: 0 1px 2px rgba(15,17,23,0.06), 0 8px 24px rgba(15,17,23,0.12);
+}
+/* Map control buttons use px sizes so large-text mode can't push them off-screen. */
+.map-ctl { display: flex; align-items: center; gap: 6px; height: 44px; min-width: 44px; justify-content: center; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 600; }
+@media (max-width: 767px), (max-height: 760px) { .map-ctl-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); } .map-ctl { padding: 0; width: 44px; } }
+.map-pin { background: none; border: 0; padding: 0; cursor: pointer; line-height: 1; }
+.map-pin-inner {
+  position: relative; display: block;
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,0.28));
+  animation: pinDrop 360ms cubic-bezier(0.34,1.56,0.64,1) both; transform-origin: bottom center;
+  transition: transform 150ms ease;
+}
+.map-pin:hover .map-pin-inner, .map-pin:focus-visible .map-pin-inner { transform: translateY(-3px) scale(1.12); }
+.map-pin-label {
+  position: absolute; left: 0; right: 0; top: 18%; text-align: center;
+  font: 700 11px/1 'Inter', system-ui, sans-serif; letter-spacing: -0.02em; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.35);
+}
+.map-pin:focus-visible { outline: 3px solid #111827 !important; outline-offset: 2px !important; border-radius: 50% !important; }
+.station-pin {
+  width: 26px; height: 26px; border-radius: 50%; border: 3px solid #fff; background: #1d4ed8; color: #fff;
+  font: 700 12px/1 'Inter', system-ui, sans-serif; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3); cursor: pointer;
+}
+.user-dot { position: relative; width: 22px; height: 22px; }
+.user-dot-core { position: absolute; inset: 3px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
+.user-dot-pulse { position: absolute; inset: -10px; border-radius: 50%; background: rgba(26,115,232,0.22); animation: pulseRing 2.4s ease-out infinite; }
+.am-popup .maplibregl-popup-content { border-radius: 14px; padding: 12px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.16); font-family: 'Inter', system-ui, sans-serif; }
+.am-popup-title { margin: 0; font-weight: 600; font-size: 14px; color: #111827; }
+.am-popup-sub { margin: 2px 0 0; font-size: 12px; color: #4b5563; text-transform: capitalize; }
+.route-badge {
+  display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%;
+  border: 3px solid #fff; color: #fff; font: 800 13px/1 'Inter', system-ui, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.barrier-pin {
+  width: 26px; height: 26px; border-radius: 8px; border: 2px solid #fff; color: #fff; display: flex; align-items: center; justify-content: center;
+  font: 800 13px/1 'Inter', system-ui, sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transform: rotate(45deg); cursor: pointer;
+}
+.barrier-pin > span { transform: rotate(-45deg); }
+
 /* ── Component layer ─────────────────────────────────────────────────────── */
 @layer components {
   .card {
@@ -166,6 +225,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 
 /* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes pinDrop { from { transform: translateY(-24px) scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pulseRing { 0% { transform: scale(0.4); opacity: 0.7; } 100% { transform: scale(2.2); opacity: 0; } }
 @keyframes pageIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -204,6 +265,7 @@ html.a11y-mode .btn-ghost   { border-color: #595959 !important; color: #0a0a0a !
 html.a11y-mode .btn-alert   { background-color: #b91c1c !important; color: #fff !important; }
 html.a11y-mode .card        { border-width: 2px !important; border-color: #595959 !important; box-shadow: none !important; }
 html.a11y-mode .leaflet-bar a { width: 48px !important; height: 48px !important; line-height: 48px !important; font-size: 22px !important; }
+html.a11y-mode .map-pin-inner { zoom: 1.3; }
 
 /* ── Skip nav ────────────────────────────────────────────────────────────── */
 .skip-nav {
@@ -220,3 +282,103 @@ html.a11y-mode .leaflet-bar a { width: 48px !important; height: 48px !important;
   font-size: 0.95rem;
 }
 .skip-nav:focus { top: 0; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   "Adjust my experience" — every class here is toggled on <html> by
+   src/lib/a11y.ts. Each block is one setting.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Text size — rem text scales via html font-size; fixed-px classes scale via --ts. */
+html[data-text-scale="125"] { --ts: 1.25; }
+html[data-text-scale="150"] { --ts: 1.5; }
+html[data-text-scale="175"] { --ts: 1.75; }
+.text-\[9px\]  { font-size: calc(9px * var(--ts)) !important; }
+.text-\[10px\] { font-size: calc(10px * var(--ts)) !important; }
+.text-\[11px\] { font-size: calc(11px * var(--ts)) !important; }
+.text-\[13px\] { font-size: calc(13px * var(--ts)) !important; }
+.text-\[15px\] { font-size: calc(15px * var(--ts)) !important; }
+.text-\[17px\] { font-size: calc(17px * var(--ts)) !important; }
+
+/* High contrast — near-black text, dark borders, darker brand colours,
+   plus overrides for the hard-coded grey utility classes used across pages. */
+html.a11y-contrast {
+  --c-bg: 255 255 255;
+  --c-primary: 0 74 173;
+  --c-accent: 0 105 105;
+  --c-alert: 179 0 0;
+  --c-ink: 0 0 0;
+  --c-muted: 33 37 41;
+  --c-border: 60 60 60;
+  --c-surface: 235 235 235;
+}
+html.a11y-contrast body { background: #fff; color: #000; }
+html.a11y-contrast [class*="text-[#6b7280]"], html.a11y-contrast [class*="text-[#9aa0a6]"],
+html.a11y-contrast [class*="text-[#5f6368]"], html.a11y-contrast [class*="text-[#374151]"],
+html.a11y-contrast [class*="text-muted"] { color: #1f1f1f !important; }
+html.a11y-contrast [class*="text-[#1a73e8]"] { color: #004aad !important; }
+html.a11y-contrast [class*="text-[#1e8e3e]"], html.a11y-contrast .badge-green { color: #0b5e1f !important; }
+html.a11y-contrast .badge, html.a11y-contrast .badge-green, html.a11y-contrast .badge-red,
+html.a11y-contrast .chip, html.a11y-contrast .card, html.a11y-contrast .input,
+html.a11y-contrast .btn-ghost, html.a11y-contrast .gmaps-btn { border-width: 2px !important; border-color: #000 !important; }
+html.a11y-contrast .chip-active { background: #004aad !important; color: #fff !important; }
+html.a11y-contrast .glass { background: #fff !important; backdrop-filter: none !important; border: 2px solid #000 !important; }
+html.a11y-contrast :focus-visible { outline: 3px solid #000 !important; box-shadow: 0 0 0 6px #ffd400 !important; }
+html.a11y-contrast ::placeholder { color: #3a3a3a !important; }
+
+/* Readable font — Atkinson Hyperlegible (loaded on demand). */
+html.a11y-readable body, html.a11y-readable h1, html.a11y-readable h2, html.a11y-readable h3,
+html.a11y-readable h4, html.a11y-readable button, html.a11y-readable input, html.a11y-readable textarea,
+html.a11y-readable select { font-family: 'Atkinson Hyperlegible', 'Inter', system-ui, sans-serif !important; letter-spacing: 0 !important; }
+
+/* Text spacing — WCAG 1.4.12 minimums (helps dyslexia). */
+html.a11y-spacing body * {
+  line-height: 1.6 !important;
+  letter-spacing: 0.12em !important;
+  word-spacing: 0.16em !important;
+}
+html.a11y-spacing p { margin-bottom: 0.5em; }
+html.a11y-spacing .truncate { white-space: normal !important; overflow: visible !important; }
+
+/* Underline links so they don't rely on colour alone. */
+html.a11y-underline a { text-decoration: underline !important; text-underline-offset: 3px; }
+
+/* Large cursor. */
+html.a11y-cursor, html.a11y-cursor * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cpath d='M6 4l32 18-14 3 8 15-6 3-8-15-12 10z' fill='%23000' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E") 6 4, auto !important;
+}
+html.a11y-cursor a, html.a11y-cursor button, html.a11y-cursor [role="button"] {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cpath d='M6 4l32 18-14 3 8 15-6 3-8-15-12 10z' fill='%231a73e8' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E") 6 4, pointer !important;
+}
+
+/* Large touch targets (motor impairments, tremor) — WCAG 2.5.5 AAA. */
+html.a11y-targets button, html.a11y-targets a, html.a11y-targets [role="button"],
+html.a11y-targets input, html.a11y-targets select, html.a11y-targets .chip {
+  min-height: 48px;
+}
+html.a11y-targets button, html.a11y-targets [role="button"] { min-width: 48px; }
+html.a11y-targets .chip { padding-left: 1.1rem; padding-right: 1.1rem; }
+html.a11y-targets .map-pin-inner { zoom: 1.3; }
+
+/* Reduce motion — kill CSS animation/transition everywhere. */
+html.a11y-reduce-motion *, html.a11y-reduce-motion *::before, html.a11y-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Greyscale (sensory overload). The map canvas stays legible because pins carry text + shapes. */
+html.a11y-grey body { filter: grayscale(1); }
+
+/* Reading guide (cognitive / dyslexia) — positioned by ReadingGuide.tsx. */
+.reading-guide {
+  position: fixed; left: 0; right: 0; height: 2.6em; pointer-events: none; z-index: 2000;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.38);
+  border-top: 2px solid #ffd400; border-bottom: 2px solid #ffd400;
+}
+
+/* Screen-reader-only helper (Tailwind's sr-only, usable from plain CSS). */
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}

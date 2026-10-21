@@ -6,10 +6,23 @@ interface Props {
   size?: number
 }
 
+/**
+ * Score → colour. Shades are dark enough for white text on top (≥4.5:1).
+ * With the colour-blind-safe setting on, uses the Okabe-Ito blue / orange /
+ * reddish-purple set, which stays distinguishable for all common CVD types.
+ */
 export function scoreColor(score: number): string {
-  if (score >= 8) return '#22c55e'
-  if (score >= 5) return '#eab308'
-  return '#FF6B47'
+  const safe = typeof document !== 'undefined' && document.documentElement.classList.contains('a11y-cvd')
+  if (score >= 8) return safe ? '#0060a0' : '#15803d'
+  if (score >= 5) return safe ? '#b35c00' : '#a16207'
+  return safe ? '#a3307a' : '#c2410c'
+}
+
+/** Word label for a score so colour is never the only signal (WCAG 1.4.1). */
+export function scoreWord(score: number): string {
+  if (score >= 8) return 'Good access'
+  if (score >= 5) return 'Some barriers'
+  return 'Major barriers'
 }
 
 /** Animated SVG progress ring (0 → score on mount, re-animates on score change). */

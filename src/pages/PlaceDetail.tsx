@@ -25,6 +25,9 @@ import { fetchOsmDetails } from '../lib/osmDetails'
 import type { OsmData } from '../lib/osmDetails'
 import type { Place, Review, Alert, AccessSpecs } from '../types'
 import { checkAdaCompliance } from '../lib/adaCompliance'
+import AccessDescription from '../components/AccessDescription'
+import { describePlace } from '../lib/describe'
+import { routeHref } from '../components/PlaceSheet'
 import type { AdaFlag } from '../lib/adaCompliance'
 
 function timeAgo(ms: number) {
@@ -395,6 +398,14 @@ export default function PlaceDetail() {
         </section>
       )}
 
+      {/* ── Plain-language accessibility description ───────────── */}
+      {!osmLoading && osmData && (
+        <section className="card mb-6 p-5" aria-labelledby="expect-heading">
+          <h2 id="expect-heading" className="label mb-3">What to expect</h2>
+          <AccessDescription name={place.name} desc={describePlace(osmData.raw)} />
+        </section>
+      )}
+
       {/* ── Physical feature badges ─────────────────────────────── */}
       {!osmLoading && osmData && (() => {
         const s = osmData.specs
@@ -596,7 +607,7 @@ export default function PlaceDetail() {
         {!osmOnlyMode && <button onClick={() => setShowReview(true)} className="btn-primary"><Star size={16} /> Write a review</button>}
         <button onClick={() => setShowSpecsForm(true)} className="btn-ghost"><CheckCircle2 size={16} /> Add specs</button>
         <button onClick={() => setShowReport(true)} className="btn-alert"><Flag size={16} /> Report issue</button>
-        <Link to="/route" className="btn-ghost"><RouteIcon size={16} /> Route</Link>
+        <Link to={routeHref(place.lat, place.lng, place.name)} className="btn-ghost"><RouteIcon size={16} /> Accessible route</Link>
         <Link to={`/place/${place.id}/indoor`} className="btn-ghost"><Building2 size={16} /> Indoor map</Link>
         <a href={googleMapsTo([place.lat, place.lng])} target="_blank" rel="noreferrer" className="gmaps-btn">
           <ExternalLink size={16} /> Google Maps

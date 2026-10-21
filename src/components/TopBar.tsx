@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, Search, User, LogIn } from 'lucide-react'
+import { Menu, Search, User, LogIn, Accessibility } from 'lucide-react'
 import AuthModal from './AuthModal'
 import { useStore } from '../store/useStore'
 
@@ -64,6 +64,16 @@ export default function TopBar() {
           >
             <Search size={17} className="shrink-0 text-[#9aa0a6]" aria-hidden="true" />
             <span className="truncate">Search places, addresses…</span>
+          </button>
+
+          {/* Accessibility settings — same place on every screen (WCAG 3.2.6). */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('am:open-a11y'))}
+            aria-label="Accessibility settings (Alt+A)"
+            aria-haspopup="dialog"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0b3d91] text-white shadow-[0_2px_10px_rgba(11,61,145,0.35)] ring-2 ring-white"
+          >
+            <Accessibility size={21} aria-hidden="true" />
           </button>
 
           {user ? (

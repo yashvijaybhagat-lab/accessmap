@@ -268,6 +268,16 @@ function friendlyError(code?: string, message?: string): string {
       return 'Too many attempts. Please try again later.'
     case 'auth/network-request-failed':
       return 'Network error. Check your connection and try again.'
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the sign-in window. Allow pop-ups for this site and try again.'
+    case 'auth/operation-not-allowed':
+      return 'This sign-in method is turned off. Enable it in Firebase → Authentication → Sign-in method.'
+    case 'auth/internal-error':
+      return 'Google sign-in could not start. Check your connection, disable content blockers for this site, and try again.'
+    case 'auth/account-exists-with-different-credential':
+      return 'You already have an account with this email using a different sign-in method. Sign in with email instead.'
+    case 'auth/missing-password':
+      return 'Please enter your password.'
     case 'auth/unauthorized-domain':
       return 'This domain is not authorised in Firebase. Add it under Authentication → Settings → Authorised domains.'
     default:

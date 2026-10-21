@@ -3,21 +3,22 @@ import { useEffect, useState } from 'react'
 /**
  * Returns true when animations should be suppressed — either the OS
  * "reduce motion" setting is on, or the in-app Accessibility mode
- * (`html.a11y-mode`) is active. Used to gate every `motion` transition so
+ * (`html.a11y-mode`) or the "Reduce motion" setting (`html.a11y-reduce-motion`) is on. Used to gate every `motion` transition so
  * sheets / drawers / page slides appear instantly instead of moving.
  */
 export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => {
     if (typeof window === 'undefined') return false
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const a11y = document.documentElement.classList.contains('a11y-mode')
-    return mq || a11y
+    const cl = document.documentElement.classList
+    return mq || cl.contains('a11y-mode') || cl.contains('a11y-reduce-motion')
   })
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
     const recompute = () =>
-      setReduced(mq.matches || document.documentElement.classList.contains('a11y-mode'))
+      setReduced(mq.matches || document.documentElement.classList.contains('a11y-mode')
+        || document.documentElement.classList.contains('a11y-reduce-motion'))
     recompute()
     mq.addEventListener('change', recompute)
     // a11y-mode toggles a class on <html> — observe it

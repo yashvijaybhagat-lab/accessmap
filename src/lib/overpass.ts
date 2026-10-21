@@ -72,6 +72,8 @@ export interface Poi {
   website?: string
   imageUrl?: string
   wheelchairDescription?: string
+  /** Raw OSM tags — used to build the plain-language description. */
+  tags?: Record<string, string>
 }
 
 const SMOOTH = ['asphalt', 'paved', 'concrete', 'paving_stones', 'wood', 'metal', 'rubber', 'tartan', 'tiles']
@@ -443,6 +445,7 @@ function placeholderPois(center: [number, number], category: CategoryKey): Poi[]
     category,
     address: seed.address,
     ...deriveAccess(seed.tags, category),
+    tags: seed.tags,
   }))
 }
 
@@ -454,37 +457,67 @@ function wikimediaThumb(id: string): string | undefined {
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
 ]
 
-// Give each endpoint a bounded window rather than however long the browser's
-// default TCP/TLS timeout takes (which can be a minute or more on a flaky or
-// blocked connection) — otherwise a single slow endpoint can stall the whole
-// category search, and the placeholder fallback never gets a chance to show.
-const OVERPASS_TIMEOUT_MS = 5000
-
-async function overpassQuery(q: string, signal?: AbortSignal): Promise<any> {
-  const body = 'data=' + encodeURIComponent(q)
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    const ac = new AbortController()
-    const onCallerAbort = () => ac.abort()
-    signal?.addEventListener('abort', onCallerAbort)
-    const timer = setTimeout(() => ac.abort(), OVERPASS_TIMEOUT_MS)
-    try {
-      const res = await fetch(endpoint, { method: 'POST', body, signal: ac.signal })
-      if (res.ok) return await res.json()
-    } catch {
-      // Only the caller aborting (e.g. a newer search superseding this one)
-      // should stop the whole lookup — our own per-endpoint timeout just
-      // means "try the next endpoint".
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onCallerAbort)
-    }
+/**
+ * Overpass lookup used across the app: mirrors are raced (staggered) and the
+ * whole lookup is capped at `budgetMs`, so a busy public server can't leave
+ * the UI spinning — callers fall back gracefully on failure.
+ */
+export async function overpassQuery(q: string, signal?: AbortSignal, budgetMs = 15000): Promise<any> {
+  const ac = new AbortController()
+  const onAbort = () => ac.abort()
+  signal?.addEventListener('abort', onAbort)
+  const timer = setTimeout(() => ac.abort(), budgetMs)
+  try {
+    return await overpassHedged(q, ac.signal, 2500)
+  } catch (e) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    throw e instanceof DOMException ? new Error('Overpass timed out') : e
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
   }
-  throw new Error('All Overpass endpoints failed')
+}
+
+/**
+ * Hedged query: start the first mirror, then another every `staggerMs` until
+ * one answers. Used for one-off checks (route scans) where waiting on a single
+ * overloaded server would blow the time budget. Losing requests are aborted.
+ */
+export async function overpassHedged(q: string, signal?: AbortSignal, staggerMs = 4000): Promise<any> {
+  const body = 'data=' + encodeURIComponent(q)
+  const controllers: AbortController[] = []
+  let settled = false
+  const onAbort = () => controllers.forEach((c) => c.abort())
+  signal?.addEventListener('abort', onAbort)
+  try {
+    return await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint, i) => {
+      if (i) {
+        // Abortable wait, so a caller's time budget ends the whole race promptly.
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, i * staggerMs)
+          signal?.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')) }, { once: true })
+        })
+      }
+      // Another mirror already answered (or the caller gave up) — don't start this one.
+      if (settled || signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const ac = new AbortController(); controllers.push(ac)
+      const res = await fetch(endpoint, { method: 'POST', body, signal: ac.signal })
+      if (!res.ok) throw new Error(`Overpass ${res.status}`)
+      return res.json()
+    }))
+  } catch (e) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    throw e instanceof AggregateError ? new Error('All Overpass endpoints failed') : e
+  } finally {
+    settled = true
+    controllers.forEach((c) => c.abort())
+    signal?.removeEventListener('abort', onAbort)
+  }
 }
 
 export async function nearbyByCategory(
@@ -543,6 +576,7 @@ export async function nearbyByCategory(
       website: tags.website || tags['contact:website'] || undefined,
       wheelchairDescription: tags['wheelchair:description'] || undefined,
       ...deriveAccess(tags, category),
+      tags,
     }
     out.push(poi)
     if (!imageUrl) needsImage.push(tags.name)

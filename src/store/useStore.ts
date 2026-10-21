@@ -99,7 +99,11 @@ export const useStore = create<AppState>((set, get) => ({
     void (async () => {
       const auth = await getAuthInstance()
       if (!auth) { set({ authReady: true }); return }
-      const { onAuthStateChanged } = await import('firebase/auth')
+      const { onAuthStateChanged, getRedirectResult } = await import('firebase/auth')
+      // Completes a Google sign-in that fell back to a full-page redirect
+      // (popup blocked, or running as an installed app). onAuthStateChanged
+      // below picks up the signed-in user; this just surfaces any error.
+      getRedirectResult(auth).catch((e) => console.error('[auth] redirect sign-in failed:', e))
       onAuthStateChanged(auth, async (fbUser) => {
         if (fbUser) {
           let role: 'admin' | 'user' = 'user'
@@ -135,16 +139,38 @@ export const useStore = create<AppState>((set, get) => ({
   signInGoogle: async () => {
     const auth = await getAuthInstance()
     if (!auth) throw new Error('Firebase is not configured.')
-    const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth')
-    await signInWithPopup(auth, new GoogleAuthProvider())
+    const { GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await import('firebase/auth')
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
+    // Installed (standalone) PWAs can't receive a popup's result — use a redirect.
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches
+      || (navigator as Navigator & { standalone?: boolean }).standalone === true
+    if (standalone) { await signInWithRedirect(auth, provider); return }
+    try {
+      await signInWithPopup(auth, provider)
+    } catch (e: any) {
+      // Popup blocked or unsupported (Safari, in-app browsers) → redirect instead.
+      if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e?.code)) {
+        await signInWithRedirect(auth, provider)
+        return
+      }
+      throw e
+    }
   },
 
-  signInEmail: async (email, pw, _name, register) => {
+  signInEmail: async (email, pw, name, register) => {
     const auth = await getAuthInstance()
     if (!auth) throw new Error('Firebase is not configured.')
-    const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth')
-    if (register) await createUserWithEmailAndPassword(auth, email, pw)
-    else await signInWithEmailAndPassword(auth, email, pw)
+    const { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth')
+    if (register) {
+      const cred = await createUserWithEmailAndPassword(auth, email, pw)
+      const displayName = name?.trim()
+      if (displayName) {
+        await updateProfile(cred.user, { displayName })
+        // onAuthStateChanged fired before the name was set — patch it in.
+        set((s) => (s.user ? { user: { ...s.user, displayName } } : s))
+      }
+    } else await signInWithEmailAndPassword(auth, email, pw)
   },
 
   logout: async () => {

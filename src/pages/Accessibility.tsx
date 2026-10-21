@@ -11,7 +11,9 @@ const CONFORMANCE = [
   { area: 'Images', status: 'pass', detail: 'All informative images have descriptive alt text; decorative images have alt="".' },
   { area: 'Form labels', status: 'pass', detail: 'Every form control has an associated <label> or aria-label.' },
   { area: 'Interactive components', status: 'pass', detail: 'Buttons, links, and modals expose correct ARIA roles and states.' },
-  { area: 'Map (Leaflet)', status: 'partial', detail: 'The interactive map provides a screen-reader place list, keyboard-focusable labelled markers, and live result announcements. Complex geospatial navigation remains a known limitation of web mapping.' },
+  { area: 'Map (3D, MapLibre)', status: 'partial', detail: 'Every pin is a labelled button that shows its score as text. Arrow keys pan and +/− zoom; press L for a list view of everything on the map. A flat 2D mode removes tilt and 3D buildings. Complex geospatial navigation remains a known limitation of web mapping.' },
+  { area: 'Personalisation', status: 'pass', detail: 'One-tap setups for low vision, blindness, colour blindness, deafness, wheelchair / dexterity, dyslexia / cognitive, vestibular and sensory needs, plus text size up to 175%, high contrast, text spacing, large cursor, large targets and a reading guide (Alt + A).' },
+  { area: 'Routing', status: 'pass', detail: 'Routes are planned per need (manual wheelchair, power chair, walker, low vision, walking), checked for steps, kerbs, crossings, surfaces and slopes, and can be read aloud or followed with spoken, vibrating step-by-step guidance.' },
   { area: 'Motion', status: 'pass', detail: 'Animated elements respect prefers-reduced-motion — including WebGL (Aurora) and GSAP effects, which stop their animation loops, not just CSS transitions.' },
   { area: 'Text to speech', status: 'pass', detail: 'Built-in read-aloud controls on place details and alerts, plus an optional "read aloud on focus" mode in the accessibility panel.' },
   { area: 'Live updates', status: 'pass', detail: 'New reviews and alerts stream in real time and are announced to screen readers via aria-live regions.' },
@@ -83,7 +85,7 @@ export default function AccessibilityStatement() {
           <ul className="mt-3 space-y-2 text-muted" role="list">
             <li className="flex gap-2">
               <AlertCircle size={16} className="mt-0.5 shrink-0 text-[#f59e0b]" aria-hidden="true" />
-              <span><strong className="text-ink">Interactive map:</strong> Leaflet-based maps present inherent accessibility barriers for keyboard-only and screen reader users. We provide a text-based place list as an alternative. We are investigating ARIA-Live announcements for map state changes.</span>
+              <span><strong className="text-ink">Interactive map:</strong> Visual maps present inherent barriers for keyboard-only and screen reader users. The list view (press L) and the route directions list give the same information as text, and result counts are announced live.</span>
             </li>
             <li className="flex gap-2">
               <AlertCircle size={16} className="mt-0.5 shrink-0 text-[#f59e0b]" aria-hidden="true" />
@@ -91,7 +93,7 @@ export default function AccessibilityStatement() {
             </li>
             <li className="flex gap-2">
               <AlertCircle size={16} className="mt-0.5 shrink-0 text-[#f59e0b]" aria-hidden="true" />
-              <span><strong className="text-ink">Third-party content:</strong> OpenStreetMap tiles served by CARTO are outside our control. We cannot guarantee their accessibility.</span>
+              <span><strong className="text-ink">Third-party data:</strong> Map tiles (OpenFreeMap), routing (Valhalla) and place data (OpenStreetMap) are community-maintained. Accessibility details are only as complete as the map — places say clearly what is not yet known.</span>
             </li>
           </ul>
         </section>

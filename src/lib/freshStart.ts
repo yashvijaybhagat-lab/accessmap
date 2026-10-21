@@ -13,17 +13,16 @@
 const STAMP_KEY = 'am.session'
 
 /** Keys that make up "my profile" — cleared on a re-run. */
+// Accessibility preferences (am.a11y.*, am.easyMode, am.speakFocus) are
+// deliberately NOT cleared: wiping them on every deploy forced disabled users
+// to reconfigure the app each time it was updated.
 const CLEARABLE = [
   'am.needs', // accessibility needs / compatibility profile
-  'am.easyMode', // accessibility mode on/off
-  'am.a11y.v1', // "Adjust my experience" toggles
-  'am.speakFocus', // speak-on-focus preference
 ]
 
 try {
   if (localStorage.getItem(STAMP_KEY) !== __APP_SESSION__) {
     CLEARABLE.forEach((k) => localStorage.removeItem(k))
-    document.documentElement.classList.remove('a11y-mode')
     localStorage.setItem(STAMP_KEY, __APP_SESSION__)
   }
 } catch {

@@ -1,4 +1,5 @@
 import './lib/freshStart' // must run before the store reads localStorage
+import './lib/a11y' // applies saved accessibility settings before first paint
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

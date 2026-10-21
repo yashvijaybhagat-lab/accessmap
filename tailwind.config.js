@@ -3,16 +3,18 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      // Colours are CSS variables (RGB channels, set in index.css) so the
+      // high-contrast accessibility mode can swap the whole palette at runtime.
       colors: {
-        bg:      '#f8f9fb',
-        primary: '#1a73e8',
-        accent:  '#0ABFBF',
-        alert:   '#ea4335',
-        card:    '#ffffff',
-        ink:     '#0f1117',
-        muted:   '#6b7280',
-        border:  '#e5e7eb',
-        surface: '#f3f4f6',
+        bg:      'rgb(var(--c-bg) / <alpha-value>)',
+        primary: 'rgb(var(--c-primary) / <alpha-value>)',
+        accent:  'rgb(var(--c-accent) / <alpha-value>)',
+        alert:   'rgb(var(--c-alert) / <alpha-value>)',
+        card:    'rgb(var(--c-card) / <alpha-value>)',
+        ink:     'rgb(var(--c-ink) / <alpha-value>)',
+        muted:   'rgb(var(--c-muted) / <alpha-value>)',
+        border:  'rgb(var(--c-border) / <alpha-value>)',
+        surface: 'rgb(var(--c-surface) / <alpha-value>)',
       },
       fontFamily: {
         display: ['Inter', 'system-ui', 'sans-serif'],
