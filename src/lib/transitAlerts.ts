@@ -155,11 +155,16 @@ async function fetchBart(apiKey: string): Promise<AgencyOutage[]> {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-export async function fetchAgencyOutages(): Promise<AgencyOutage[]> {
+/**
+ * @param allowMock  return the demo outages when no API keys are set. Only the
+ *                   offline demo should pass true — on the live site, made-up
+ *                   elevator outages would be shown to real people as fact.
+ */
+export async function fetchAgencyOutages(allowMock = true): Promise<AgencyOutage[]> {
   const wmataKey = import.meta.env.VITE_WMATA_KEY as string | undefined
   const bartKey = import.meta.env.VITE_BART_KEY as string | undefined
 
-  if (!wmataKey && !bartKey) return mockAgencyOutages
+  if (!wmataKey && !bartKey) return allowMock ? mockAgencyOutages : []
 
   const results = await Promise.allSettled([
     wmataKey ? fetchWmata(wmataKey) : Promise.resolve([]),

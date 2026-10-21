@@ -1,4 +1,4 @@
-import { FIREBASE_ENABLED, getDb } from './firebase'
+import { FIREBASE_ENABLED, getDb, getAuthInstance } from './firebase'
 import type { Place, Review, Alert, AccessSpecs, Scores } from '../types'
 import { mockPlaces, mockReviews, mockAlerts } from './mockData'
 import { checkRate } from './rateLimit'
@@ -234,9 +234,10 @@ export async function getAlerts(placeId?: string, onlyActive = true): Promise<Al
   if (onlyActive) clauses.push(where('status', '==', 'active'))
   const q = query(collection(db, 'alerts'), ...clauses)
   const snap = await getDocs(q)
-  const data = snap.docs
-    .map((d) => ({ id: d.id, ...(d.data() as Omit<Alert, 'id'>), createdAt: toMs(d.data().createdAt) }))
-    .sort((a, b) => b.createdAt - a.createdAt)
+  const data = withAgencyAlerts(
+    snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Alert, 'id'>), createdAt: toMs(d.data().createdAt) })),
+    placeId,
+  )
   if (!placeId) cache.alerts = { data, ts: Date.now() }
   return data
 }
@@ -257,11 +258,17 @@ export async function addAlert(input: Omit<Alert, 'id' | 'createdAt' | 'status'>
     emitLocal()
     return alert
   }
+  // The security rules only accept reports from signed-in users — say so
+  // plainly instead of surfacing a raw "permission denied".
+  const auth = await getAuthInstance()
+  if (!auth?.currentUser) throw new Error('Please sign in to report an issue — it helps us keep alerts trustworthy.')
   const { collection, addDoc, serverTimestamp } = await fs()
+  // Firestore rejects `undefined` field values (e.g. no photo attached), so drop them.
+  const clean = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined))
   const ref = await addDoc(collection(db, 'alerts'), {
-    ...input, status: 'active', createdAt: serverTimestamp(),
+    ...clean, source: 'community', status: 'active', createdAt: serverTimestamp(),
   })
-  return { ...input, id: ref.id, status: 'active', createdAt: Date.now() }
+  return { ...input, source: 'community', id: ref.id, status: 'active', createdAt: Date.now() }
 }
 
 export async function resolveAlert(id: string): Promise<void> {
@@ -334,13 +341,16 @@ export function subscribeAlerts(
       const q = query(collection(db, 'alerts'), ...clauses)
       unsubFs = onSnapshot(q, (snap) => {
         if (!active) return
-        const list = snap.docs
+        lastStored = snap.docs
           .map((d) => ({ id: d.id, ...(d.data() as Omit<Alert, 'id'>), createdAt: toMs(d.data().createdAt) }))
-          .sort((a, b) => b.createdAt - a.createdAt)
-        cb(list)
+        cb(withAgencyAlerts(lastStored, placeId))
       }, () => { /* swallow permission errors — UI keeps last value */ })
     })()
-    return () => { active = false; unsubFs?.() }
+    // Agency outages live in memory (see runSync), so re-emit when they change.
+    let lastStored: Alert[] = []
+    const onAgency = () => { if (active) cb(withAgencyAlerts(lastStored, placeId)) }
+    agencyListeners.add(onAgency)
+    return () => { active = false; unsubFs?.(); agencyListeners.delete(onAgency) }
   }
 
   const run = () => { getAlerts(placeId, onlyActive).then((a) => { if (active) cb(a) }) }
@@ -411,11 +421,42 @@ export function syncAgencyAlerts(): Promise<void> {
   return _syncInFlight
 }
 
+/* Live (Firebase) mode: transit outages are kept in memory and merged into
+ * alert lists — never written to Firestore from the browser. Client writes
+ * would let any visitor post "official" agency alerts, and the security rules
+ * (correctly) reject them, which is what used to spam permission errors.
+ * A server-side job is the right place to persist these if that's wanted. */
+let agencyAlerts: Alert[] = []
+const agencyListeners = new Set<() => void>()
+
+function withAgencyAlerts(stored: Alert[], placeId?: string): Alert[] {
+  const extra = agencyAlerts.filter((a) => (placeId ? a.placeId === placeId : true))
+  return [...stored, ...extra].sort((a, b) => b.createdAt - a.createdAt)
+}
+
 async function runSync(): Promise<void> {
   let outages: AgencyOutage[]
   try {
-    outages = await fetchAgencyOutages()
+    outages = await fetchAgencyOutages(!FIREBASE_ENABLED)
   } catch {
+    return
+  }
+
+  if (FIREBASE_ENABLED) {
+    const next: Alert[] = []
+    for (const outage of outages) {
+      const placeId = await resolveOutagePlaceId(outage)
+      if (!placeId) continue
+      next.push({
+        ...outageToAlert(outage, placeId),
+        id: `agency-${outage.id}`,
+        status: 'active',
+        createdAt: outage.outageDate,
+      } as Alert)
+    }
+    const changed = next.length !== agencyAlerts.length || next.some((a, i) => a.id !== agencyAlerts[i]?.id)
+    agencyAlerts = next
+    if (changed) { cache.alerts = undefined; agencyListeners.forEach((fn) => fn()) }
     return
   }
 

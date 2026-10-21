@@ -32,11 +32,23 @@ service cloud.firestore {
         && validScores(d.scores)
         && (d.status == 'approved' || d.status == 'hidden');
     }
+    // Matches what the app actually writes (lib/data.ts addAlert). The old
+    // version required a `body` field the app never sends, so every report failed.
+    // Clients may only post community reports — "agency" alerts can't be spoofed.
     function validAlert() {
       let d = request.resource.data;
-      return d.keys().hasAll(['placeId','type','body','createdAt','status'])
-        && d.body is string && d.body.size() >= 5 && d.body.size() <= 500
-        && d.status == 'active';
+      return d.keys().hasAll(['placeId','type','description','reportedBy','createdAt','status','source'])
+        && d.keys().hasOnly(['placeId','type','description','reportedBy','photoUrl','aiVerified','aiConfidence','createdAt','status','source'])
+        && d.placeId is string && d.placeId.size() > 0 && d.placeId.size() <= 200
+        && d.type in ['elevator','ramp','bathroom','noise','obstruction','other']
+        && d.description is string && d.description.size() >= 5 && d.description.size() <= 500
+        && d.reportedBy is string && d.reportedBy.size() <= 100
+        && (!('photoUrl' in d) || (d.photoUrl is string && d.photoUrl.size() <= 2000))
+        && (!('aiVerified' in d) || d.aiVerified is bool)
+        && (!('aiConfidence' in d) || (d.aiConfidence is number && d.aiConfidence >= 0 && d.aiConfidence <= 1))
+        && d.createdAt == request.time
+        && d.status == 'active'
+        && d.source == 'community';
     }
     function validSpec() {
       return request.resource.data.userId == request.auth.uid
