@@ -433,7 +433,8 @@ const PLACEHOLDER_SEEDS: Record<CategoryKey, PlaceholderSeed[]> = {
   ],
 }
 
-function placeholderPois(center: [number, number], category: CategoryKey): Poi[] {
+/** Demo-only sample places (offline mode). Never shown as real results on the live site. */
+export function placeholderPois(center: [number, number], category: CategoryKey): Poi[] {
   const seeds = PLACEHOLDER_SEEDS[category] ?? []
   const [lat, lng] = center
   return seeds.map((seed, i) => ({
@@ -525,7 +526,7 @@ export async function nearbyByCategory(
   category: CategoryKey,
   radius = 2000,
   signal?: AbortSignal,
-): Promise<{ pois: Poi[]; needsImage: string[] }> {
+): Promise<{ pois: Poi[]; needsImage: string[]; unavailable?: boolean }> {
   const cat = CATEGORIES.find((c) => c.key === category)
   if (!cat) return { pois: [], needsImage: [] }
   await spaced('overpass', 800)
@@ -543,9 +544,10 @@ export async function nearbyByCategory(
     data = await overpassQuery(q, signal)
   } catch (e) {
     if ((e as any)?.name === 'AbortError') throw e
-    // Live query unreachable (offline, blocked, all endpoints down) — fall
-    // back to placeholders rather than a dead "nothing found" panel.
-    return { pois: placeholderPois(center, category), needsImage: [] }
+    // Live query unreachable (offline, blocked, all endpoints busy). The
+    // caller decides the fallback — real places from the map tiles, or the
+    // demo placeholders when running offline — instead of silently faking it.
+    return { pois: [], needsImage: [], unavailable: true }
   }
   const seen = new Set<string>()
   const out: Poi[] = []
@@ -582,9 +584,8 @@ export async function nearbyByCategory(
     if (!imageUrl) needsImage.push(tags.name)
   }
 
-  // Overpass reached but genuinely found nothing within radius — still
-  // better to show a placeholder than an empty "nothing found" panel.
-  if (out.length === 0) return { pois: placeholderPois(center, category), needsImage: [] }
+  // Overpass answered and there's genuinely nothing here — say so rather
+  // than inventing places.
 
   return { pois: out, needsImage }
 }

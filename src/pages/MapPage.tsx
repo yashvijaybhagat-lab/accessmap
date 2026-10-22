@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Loader2, X, LocateFixed, Accessibility, MapPin as MapPinIcon, AlertTriangle, Route as RouteIcon,
-  Navigation, Navigation2, ChevronRight, Info, Eye, Ear, Brain, TrainFront, Footprints, List, Sparkles,
+  Navigation, Navigation2, ChevronRight, Info, RefreshCw, Eye, Ear, Brain, TrainFront, Footprints, List, Sparkles,
 } from 'lucide-react'
 import BrandPin from '../components/MapPin'
 import MapView from '../components/MapView'
@@ -11,7 +11,10 @@ import PlaceSheet, { type Selected, routeHref } from '../components/PlaceSheet'
 import { scoreColor, scoreWord } from '../components/ScoreRing'
 import { getPlaces, getAlerts } from '../lib/data'
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
-import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, type Poi, type CategoryKey } from '../lib/overpass'
+import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, placeholderPois, type Poi, type CategoryKey } from '../lib/overpass'
+import { poisFromTiles, TILE_POI_MIN_ZOOM } from '../lib/tilePois'
+import { FIREBASE_ENABLED } from '../lib/firebase'
+import type { Map as MlMap } from 'maplibre-gl'
 import { getNearbyTransit, getNearbyWalkingPaths, type TransitLine, type TransitStation, type WalkingPath } from '../lib/transit'
 import { batchWikiImages } from '../lib/wikipedia'
 import { describePlace } from '../lib/describe'
@@ -48,12 +51,23 @@ const DIS_FILTERS: {
 export default function MapPage() {
   const [places, setPlaces] = useState<Place[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
-  const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null)
+  // Live device position (GPS / Wi-Fi). Never set from IP lookups — those are too rough to draw as "you".
+  const [userLoc, setUserLoc] = useState<{ lat: number; lng: number; accuracy: number } | null>(null)
+  const userLocRef = useRef(userLoc); userLocRef.current = userLoc
+  // 'live' = device fix streaming in; 'approx' states = map centred from the IP address only.
+  const [locStatus, setLocStatus] = useState<'idle' | 'searching' | 'live' | 'denied' | 'unavailable' | 'unsupported'>('idle')
+  const [following, setFollowing] = useState(false)
+  const followRef = useRef(false); followRef.current = following
+  const [locNotice, setLocNotice] = useState<{ kind: 'denied' | 'unavailable' | 'unsupported' | 'coarse'; msg: string } | null>(null)
+  const mapRef = useRef<MlMap | null>(null)
+  const [viewCenter, setViewCenter] = useState<[number, number] | null>(null)
+  const [lastSearch, setLastSearch] = useState<{ cat: CategoryKey; center: [number, number] } | null>(null)
+  const [dataSource, setDataSource] = useState<'live' | 'tiles' | 'samples' | 'unavailable' | 'zoom'>('live')
   // centerRef tracks map pan position without triggering re-renders
   // center state is only updated when we actually need to run a search
   const centerRef = useRef<[number, number] | null>(null)
   const [center, setCenter] = useState<[number, number] | null>(null)
-  const [focus, setFocus] = useState<{ lat: number; lng: number; zoom?: number } | null>(null)
+  const [focus, setFocus] = useState<{ lat: number; lng: number; zoom?: number; follow?: boolean } | null>(null)
   const [locating, setLocating] = useState(false)
 
   const [q, setQ] = useState('')
@@ -117,23 +131,23 @@ export default function MapPage() {
   const poiAbort = useRef<AbortController | null>(null)
   const watchRef = useRef<number | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     Promise.all([getPlaces(), getAlerts()]).then(([p, a]) => { setPlaces(p); setAlerts(a) })
-    locateSilent()
+    startLocation()
+    return () => stopWatch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Search overlay picked a place → fly the map there.
+  // Search overlay picked a place → fly the map there (and stop following the user).
   useEffect(() => {
     if (!mapTarget) return
+    setFollowing(false)
     setCenter([mapTarget.lat, mapTarget.lng])
     setFocus({ lat: mapTarget.lat, lng: mapTarget.lng, zoom: mapTarget.zoom ?? 15 })
     clearMapTarget()
   }, [mapTarget, clearMapTarget])
-
-  useEffect(() => () => {
-    if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current)
-  }, [])
 
   function showToast(msg: string, type: 'info' | 'error' = 'info') {
     setLocToast({ msg, type })
@@ -141,147 +155,98 @@ export default function MapPage() {
     toastTimer.current = setTimeout(() => setLocToast(null), 6000)
   }
 
-  // IP geolocation — race 3 verified-working services in parallel
+  /** Rough area from the IP address — used only to centre the map, never shown as "you". */
   async function ipCoords(): Promise<[number, number] | null> {
-    const to = (ms: number) => new Promise<never>((_, rej) => setTimeout(() => rej(new Error('t')), ms))
-    const attempt = async (fn: () => Promise<[number, number] | null>) => {
-      const c = await fn(); if (!c) throw new Error('no coords'); return c
+    const get = async (url: string, pick: (d: any) => [number, number] | null) => {
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 4000)
+      try { return pick(await (await fetch(url, { signal: ac.signal })).json()) } catch { return null } finally { clearTimeout(t) }
     }
-    try {
-      return await Promise.any([
-        // geojs.io — lat/lng as strings
-        attempt(async () => {
-          const d: any = await Promise.race([fetch('https://get.geojs.io/v1/ip/geo.json').then(r => r.json()), to(4000)])
-          const lat = parseFloat(d.latitude), lng = parseFloat(d.longitude)
-          return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] as [number, number] : null
-        }),
-        // ipwho.is — free, no key, CORS-safe
-        attempt(async () => {
-          const d: any = await Promise.race([fetch('https://ipwho.is/').then(r => r.json()), to(4000)])
-          return (d.success && d.latitude && d.longitude) ? [d.latitude, d.longitude] as [number, number] : null
-        }),
-        // geolocation-db.com — free, no key
-        attempt(async () => {
-          const d: any = await Promise.race([fetch('https://geolocation-db.com/json/').then(r => r.json()), to(4000)])
-          return (d.latitude && d.longitude && d.latitude !== 'Not found') ? [+d.latitude, +d.longitude] as [number, number] : null
-        }),
-      ])
-    } catch { return null }
+    const results = (await Promise.all([
+      get('https://ipwho.is/', (d) => (d.success && d.latitude ? [d.latitude, d.longitude] : null)),
+      get('https://geolocation-db.com/json/', (d) => (d.latitude && d.latitude !== 'Not found' ? [+d.latitude, +d.longitude] : null)),
+      get('https://get.geojs.io/v1/ip/geo.json', (d) => (d.latitude ? [parseFloat(d.latitude), parseFloat(d.longitude)] : null)),
+    ])).filter((c): c is [number, number] => !!c && !isNaN(c[0]) && !isNaN(c[1]))
+    if (!results.length) return null
+    // The services often disagree by several km — average them instead of trusting whichever answered first.
+    return [results.reduce((n, c) => n + c[0], 0) / results.length, results.reduce((n, c) => n + c[1], 0) / results.length]
   }
 
-  function startWatch() {
-    if (watchRef.current != null) return
+  const zoomForAccuracy = (acc: number) => (acc <= 50 ? 17 : acc <= 300 ? 16 : acc <= 1500 ? 14 : 12)
+
+  function stopWatch() {
+    if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current)
+    watchRef.current = null
+    if (retryTimer.current) { clearTimeout(retryTimer.current); retryTimer.current = null }
+  }
+
+  async function approximateFallback(kind: 'denied' | 'unavailable' | 'unsupported') {
+    const how =
+      kind === 'denied'
+        ? 'Location is blocked for this site. To fix it, click the icon to the left of the web address → Site settings → Location → Allow, then press Retry.'
+        : kind === 'unsupported'
+          ? 'This browser can’t share your location (it needs a secure https connection and location support).'
+          : 'Your device couldn’t work out where you are. On a Mac: System Settings → Privacy & Security → Location Services → turn it on for your browser, and keep Wi-Fi on. On a phone: turn Location on. We’ll keep trying.'
+    setLocNotice({ kind, msg: `Showing an approximate area based on your internet connection — it can be 5–15 km off. ${how}` })
+    if (userLocRef.current) return // keep the last real fix on screen
+    const c = await ipCoords()
+    if (c && !userLocRef.current) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
+  }
+
+  /**
+   * Continuous, high-accuracy tracking. One watcher feeds the blue dot for the
+   * whole session so the position is live (updates as you move) and improves
+   * as GPS / Wi-Fi refine it. `explicit` = the user pressed the locate button.
+   */
+  function startLocation(explicit = false) {
+    if (!navigator?.geolocation || !window.isSecureContext) {
+      setLocStatus('unsupported'); approximateFallback('unsupported'); return
+    }
+    stopWatch()
+    if (explicit) { setLocating(true); setFollowing(true) }
+    if (!userLocRef.current) setLocStatus('searching')
     watchRef.current = navigator.geolocation.watchPosition(
-      (p) => setUserLoc({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 10000 },
-    )
-  }
-
-  // Silent startup: never show toasts, just do best-effort centering
-  async function locateSilent() {
-    if (!navigator?.geolocation) {
-      const c = await ipCoords()
-      if (c) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords
-        setUserLoc({ lat, lng })
-        setCenter([lat, lng])
-        setFocus({ lat, lng, zoom: 15 })
-        startWatch()
-      },
-      async (err) => {
-        // GPS failed — fall back to IP centering either way
-        const c = await ipCoords()
-        if (c) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
-        // If it's specifically a blocked/denied permission, say so — this is the
-        // one case the user can actually fix, so it's worth surfacing up front
-        // rather than only when they tap "locate me".
-        if (err.code === err.PERMISSION_DENIED) {
-          showToast('Location is blocked in your browser — centering by your approximate IP location instead. Enable it in your browser’s site settings, or just search for a place.', 'info')
-        }
-        // If IP lookup also fails, the map just stays at its default view — user can search.
-      },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 },
-    )
-  }
-
-  // User-triggered location (locate button or intro CTA)
-  function locateExplicit(onDone?: (c: [number, number]) => void) {
-    setLocating(true)
-    setLocToast(null)
-
-    if (!navigator?.geolocation) {
-      ipCoords().then((c) => {
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords
+        const first = !userLocRef.current
+        setUserLoc({ lat, lng, accuracy })
+        setLocStatus('live')
         setLocating(false)
-        if (c) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 13 }); onDone?.(c) }
-        else showToast('Location unavailable — try searching for a place.', 'error')
-      })
-      return
-    }
-
-    let settled = false
-    function finish(lat: number, lng: number, precise: boolean, permDenied = false) {
-      if (settled) return
-      settled = true
-      setLocating(false)
-      setLocToast(null)
-      if (precise) {
-        setUserLoc({ lat, lng })
-        startWatch()
-      }
-      setCenter([lat, lng])
-      setFocus({ lat, lng, zoom: precise ? 17 : 13 })
-      if (!precise && permDenied) {
-        showToast(
-          'Location permission denied — enable it in your browser settings for GPS.',
-          'info',
+        setLocNotice(
+          accuracy > 1000
+            ? { kind: 'coarse', msg: `Your position is only accurate to about ${(accuracy / 1000).toFixed(1)} km. Turn on Wi-Fi or GPS for a precise location.` }
+            : null,
         )
-      }
-      onDone?.([lat, lng])
-    }
-
-    // Track 1: high-accuracy GPS (may take a few seconds on mobile)
-    let gpsWatchId: number | null = null
-    gpsWatchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        if (gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId)
-        finish(pos.coords.latitude, pos.coords.longitude, true)
-        startWatch()
+        if (first) { setCenter([lat, lng]); setFollowing(true); setFocus({ lat, lng, zoom: zoomForAccuracy(accuracy) }) }
+        else if (followRef.current) setFocus({ lat, lng, follow: true })
       },
-      async (err) => {
-        if (gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId)
-        if (settled) return
-        // GPS failed — try IP as fallback
-        const c = await ipCoords()
-        if (c) finish(c[0], c[1], false, err.code === 1)
-        else {
-          setLocating(false)
-          // If everything fails, just tell them to search — don't show a dead-end error
-          showToast(
-            err.code === 1
-              ? 'Location blocked — enable it in your browser, or type a place in the search bar.'
-              : 'Location unavailable — type a city or place in the search bar to get started.',
-            'info',
-          )
+      (err) => {
+        setLocating(false)
+        if (err.code === err.PERMISSION_DENIED) {
+          stopWatch(); setLocStatus('denied'); approximateFallback('denied'); return
+        }
+        // Position unavailable / timed out. If we already have a fix, keep showing it.
+        if (userLocRef.current) return
+        setLocStatus('unavailable')
+        approximateFallback('unavailable')
+        // Some browsers stop a watch after an error — keep retrying quietly so the
+        // dot appears as soon as Location Services / GPS come back.
+        if (!retryTimer.current) {
+          retryTimer.current = setTimeout(() => { retryTimer.current = null; if (!userLocRef.current) startLocation() }, 20000)
         }
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
     )
+  }
 
-    // Track 2: after 4s if GPS hasn't responded, try low-accuracy (wifi/cell)
-    // which is instant on desktop — if it beats GPS, use it temporarily
-    setTimeout(() => {
-      if (settled) return
-      navigator.geolocation.getCurrentPosition(
-        (pos) => finish(pos.coords.latitude, pos.coords.longitude, true),
-        () => { /* let GPS track handle the error */ },
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 },
-      )
-    }, 4000)
+  /** Locate button: jump to (and follow) your live position, or retry finding it. */
+  function locateExplicit() {
+    const u = userLocRef.current
+    if (u && locStatus === 'live') {
+      setFollowing(true)
+      setFocus({ lat: u.lat, lng: u.lng, zoom: Math.max(zoomForAccuracy(u.accuracy), mapRef.current?.getZoom() ?? 0) })
+      return
+    }
+    startLocation(true)
   }
 
   // Search autocomplete
@@ -299,12 +264,29 @@ export default function MapPage() {
 
   async function searchCategory(cat: CategoryKey, c: [number, number]) {
     setActiveCat(cat); setLoadingPois(true); setPanelOpen(true); setPois([])
+    setLastSearch({ cat, center: c })
     poiAbort.current?.abort()
     const ac = new AbortController(); poiAbort.current = ac
     try {
       let result = await nearbyByCategory(c, cat, 5000, ac.signal)
-      if (result.pois.length === 0) result = await nearbyByCategory(c, cat, 15000, ac.signal)
+      if (!result.unavailable && result.pois.length === 0) result = await nearbyByCategory(c, cat, 15000, ac.signal)
+      if (ac.signal.aborted) return
+      if (result.unavailable) {
+        // Live data servers are busy: show REAL places from the map tiles rather than nothing (or fakes).
+        const map = mapRef.current
+        if (map && map.getZoom() >= TILE_POI_MIN_ZOOM) {
+          const fromTiles = poisFromTiles(map, cat, c, 5000)
+          setPois(fromTiles); setDataSource('tiles')
+        } else if (!FIREBASE_ENABLED) {
+          setPois(placeholderPois(c, cat)); setDataSource('samples')
+        } else {
+          setPois([]); setDataSource(map ? 'zoom' : 'unavailable')
+        }
+        setLoadingPois(false)
+        return
+      }
       setPois(result.pois)
+      setDataSource('live')
       setLoadingPois(false)
       // Patch in Wikipedia images for POIs without an OSM image
       if (result.needsImage.length > 0 && !ac.signal.aborted) {
@@ -323,31 +305,49 @@ export default function MapPage() {
     }
   }
 
-  const onCenterChange = useCallback((lat: number, lng: number) => { centerRef.current = [lat, lng] }, [])
+  const onCenterChange = useCallback((lat: number, lng: number) => {
+    centerRef.current = [lat, lng]
+    setViewCenter([lat, lng])
+  }, [])
+  const onMapReady = useCallback((m: MlMap) => { mapRef.current = m }, [])
+  // Dragging / zooming the map yourself stops "follow my location".
+  const onUserGesture = useCallback(() => setFollowing(false), [])
   const onMapSelect = useCallback((p: Place) => {
+    setFollowing(false)
     setFocus({ lat: p.lat, lng: p.lng, zoom: 16 })
     setSelected({ kind: 'place', data: p })
   }, [])
   const onPoiSelect = useCallback((p: Poi) => {
+    setFollowing(false)
     setFocus({ lat: p.lat, lng: p.lng, zoom: 16 })
     setSelected({ kind: 'poi', data: p })
   }, [])
 
+  /** Search where the map is looking (so panning to another area and searching works). */
   function currentCenter(): [number, number] | null {
-    if (userLoc) return [userLoc.lat, userLoc.lng]
-    return centerRef.current ?? center
+    return centerRef.current ?? (userLoc ? [userLoc.lat, userLoc.lng] : center)
+  }
+  /** Distances are measured from you when we know where you are, else from the map centre. */
+  function distanceOrigin(): [number, number] | null {
+    return userLoc && locStatus === 'live' ? [userLoc.lat, userLoc.lng] : currentCenter()
   }
 
+  // Offer "Search this area" once the map has moved well away from the last search.
+  const movedAway = !!(lastSearch && viewCenter && panelOpen && !loadingPois
+    && haversineKm(lastSearch.center, viewCenter) > 1.2)
+
   function runCategory(cat: CategoryKey) {
-    if (activeCat === cat) { setActiveCat(null); setPois([]); setPanelOpen(false); return }
+    if (activeCat === cat) { setActiveCat(null); setPois([]); setPanelOpen(false); setLastSearch(null); return }
     const c = currentCenter()
-    if (c) {
-      searchCategory(cat, c)
-    } else {
-      setActiveCat(cat); setPanelOpen(true); setLoadingPois(true)
-      locateExplicit((loc) => searchCategory(cat, loc))
-    }
+    if (c) searchCategory(cat, c)
+    else { setActiveCat(cat); setPanelOpen(true); setLoadingPois(true); startLocation(true) }
   }
+
+  // If a category was chosen before the map had a position, run it once one arrives.
+  useEffect(() => {
+    if (activeCat && loadingPois && !lastSearch && viewCenter) searchCategory(activeCat, viewCenter)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewCenter])
 
   async function toggleTransit() {
     if (showTransit) { setShowTransit(false); setTransitLines([]); setTransitStations([]); return }
@@ -393,7 +393,9 @@ export default function MapPage() {
   }, [showA11y, forMeOnly, places, needsProfile, profileActive, dis])
 
   const sortedPois = useMemo(() => {
-    const dist = (p: Poi) => (center ? haversineKm(center, [p.lat, p.lng]) : 0)
+    // Same origin as the distances shown on each card: you (live) or the searched area.
+    const origin: [number, number] | null = userLoc && locStatus === 'live' ? [userLoc.lat, userLoc.lng] : lastSearch?.center ?? center
+    const dist = (p: Poi) => (origin ? haversineKm(origin, [p.lat, p.lng]) : 0)
     const active = DIS_FILTERS.filter((f) => dis.has(f.key))
     const filtered = active.length ? pois.filter((p) => active.every((f) => f.poi(p))) : pois
     // With a needs profile set, rank by personal match; otherwise by access score.
@@ -403,10 +405,9 @@ export default function MapPage() {
       if (Math.abs(sb - sa) > 0.05) return sb - sa
       return dist(a) - dist(b)
     })
-  }, [pois, center, dis, profileActive, needsProfile])
+  }, [pois, center, dis, profileActive, needsProfile, userLoc, locStatus, lastSearch])
 
   const activeCatMeta = CATEGORIES.find((c) => c.key === activeCat)
-  const usingSamples = pois.length > 0 && pois.every((p) => p.id.startsWith('placeholder'))
 
   // Screen-reader announcement when results arrive.
   const [announce, setAnnounce] = useState('')
@@ -429,7 +430,7 @@ export default function MapPage() {
   }, [])
 
   const listItems = useMemo(() => {
-    const c = currentCenter()
+    const c = distanceOrigin()
     const all: Selected[] = [
       ...visiblePlaces.map((p) => ({ kind: 'place' as const, data: p })),
       ...sortedPois.map((p) => ({ kind: 'poi' as const, data: p })),
@@ -439,7 +440,7 @@ export default function MapPage() {
       .sort((a, b) => (a.km ?? 0) - (b.km ?? 0))
       .slice(0, 80)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visiblePlaces, sortedPois, userLoc, center])
+  }, [visiblePlaces, sortedPois, userLoc, center, locStatus])
 
   const fmtKm = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`)
   const navBottom = 'calc(3.25rem + env(safe-area-inset-bottom) + 1rem)'
@@ -464,6 +465,8 @@ export default function MapPage() {
           transitStations={transitStations}
           walkingPaths={walkingPaths}
           controlsBottom={navBottom}
+          onReady={onMapReady}
+          onUserGesture={onUserGesture}
           controls={
             <>
               <button
@@ -493,11 +496,18 @@ export default function MapPage() {
               </button>
               <button
                 onClick={() => locateExplicit()}
-                aria-label="Show my location"
+                aria-label={locStatus === 'live' ? (following ? 'Following your location' : 'Show and follow my location') : 'Find my location'}
+                aria-pressed={locStatus === 'live' ? following : undefined}
                 disabled={locating}
-                className="flex h-[48px] w-[48px] items-center justify-center rounded-full bg-primary text-white shadow-[0_6px_18px_rgba(26,115,232,0.4)] disabled:opacity-60"
+                className={`flex h-[48px] w-[48px] items-center justify-center rounded-full shadow-[0_6px_18px_rgba(26,115,232,0.4)] disabled:opacity-60 ${
+                  following && locStatus === 'live' ? 'bg-primary text-white ring-4 ring-primary/25' : locStatus === 'live' ? 'bg-white text-primary' : 'bg-primary text-white'
+                }`}
               >
-                {locating ? <Loader2 size={20} className="animate-spin" aria-hidden="true" /> : <LocateFixed size={20} aria-hidden="true" />}
+                {locating || locStatus === 'searching'
+                  ? <Loader2 size={20} className="animate-spin" aria-hidden="true" />
+                  : following && locStatus === 'live'
+                    ? <Navigation2 size={20} className="fill-current" aria-hidden="true" />
+                    : <LocateFixed size={20} aria-hidden="true" />}
               </button>
             </>
           }
@@ -533,6 +543,28 @@ export default function MapPage() {
             </div>
           )}
         </div>
+
+        {locNotice && (
+          <div
+            role="status"
+            className={`pointer-events-auto flex shrink-0 items-start gap-2.5 rounded-2xl px-3.5 py-3 text-sm shadow-md ${
+              locNotice.kind === 'coarse' ? 'bg-[#e8f0fe] text-[#0b3d91]' : 'bg-[#fff7ed] text-[#7c2d12]'
+            }`}
+          >
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="leading-snug">{locNotice.msg}</p>
+              {locNotice.kind !== 'coarse' && locNotice.kind !== 'unsupported' && (
+                <button onClick={() => startLocation(true)} className="mt-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-bold underline-offset-2 hover:underline">
+                  Retry
+                </button>
+              )}
+            </div>
+            <button onClick={() => setLocNotice(null)} aria-label="Dismiss location message" className="-m-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-black/5">
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
 
         {/* Needs filters */}
         <div className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Filter by access need">
@@ -582,6 +614,15 @@ export default function MapPage() {
           ))}
         </div>
 
+        {movedAway && lastSearch && (
+          <button
+            onClick={() => { const c = currentCenter(); if (c) searchCategory(lastSearch.cat, c) }}
+            className="pointer-events-auto mx-auto flex shrink-0 items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-sm font-bold text-white shadow-lg"
+          >
+            <RefreshCw size={14} aria-hidden="true" /> Search this area
+          </button>
+        )}
+
         {/* Results panel */}
         {panelOpen && (
           <aside aria-label={`${activeCatMeta?.label ?? 'Places'} near you`} className="glass pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl">
@@ -594,7 +635,7 @@ export default function MapPage() {
               <div className="min-w-0 flex-1">
                 <h2 className="text-base font-bold text-ink">{activeCatMeta?.label}</h2>
                 <p className="text-xs text-muted">
-                  {loadingPois ? 'Searching nearby…' : `${sortedPois.length} place${sortedPois.length !== 1 ? 's' : ''} · ${profileActive ? 'best match for you first' : 'best access first'}`}
+                  {loadingPois ? 'Searching nearby…' : `${sortedPois.length} place${sortedPois.length !== 1 ? 's' : ''} · ${dataSource === 'tiles' ? 'nearest first' : profileActive ? 'best match for you first' : 'best access first'}`}
                 </p>
               </div>
               <button
@@ -606,10 +647,15 @@ export default function MapPage() {
               </button>
             </div>
 
-            {usingSamples && !loadingPois && (
-              <p className="flex items-start gap-2 border-b border-border/70 bg-[#fff7ed] px-4 py-2 text-xs text-[#7c2d12]" role="note">
+            {!loadingPois && dataSource !== 'live' && (
+              <p className={`flex items-start gap-2 border-b border-border/70 px-4 py-2 text-xs ${dataSource === 'tiles' ? 'bg-[#e8f0fe] text-[#0b3d91]' : 'bg-[#fff7ed] text-[#7c2d12]'}`} role="note">
                 <Info size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-                <span>Live map data is unavailable right now, so these are <strong>sample places</strong>, not real results. Try again in a moment.</span>
+                <span>
+                  {dataSource === 'tiles' && <>The live accessibility database is busy, so these are <strong>real places from the map</strong> without access ratings yet. Open one to load its details, or <button className="font-bold underline" onClick={() => { const c = currentCenter(); if (c && activeCat) searchCategory(activeCat, c) }}>try again</button>.</>}
+                  {dataSource === 'samples' && <>Offline demo: these are <strong>sample places</strong>, not real results.</>}
+                  {dataSource === 'zoom' && <>The live place database is busy. <strong>Zoom in closer</strong> and press search again to see real places from the map.</>}
+                  {dataSource === 'unavailable' && <>Place data couldn’t load right now. Check your connection and try again.</>}
+                </span>
               </p>
             )}
 
@@ -636,9 +682,10 @@ export default function MapPage() {
                 </li>
               )}
               {!loadingPois && sortedPois.map((p, i) => {
-                const here = currentCenter()
+                const here = distanceOrigin()
                 const dist = here ? haversineKm(here, [p.lat, p.lng]) : null
-                const desc = p.tags ? describePlace(p.tags, p.category) : null
+                const fromTiles = p.id.startsWith('tile-')
+                const desc = p.tags && !fromTiles ? describePlace(p.tags, p.category) : null
                 const match = profileActive ? scorePoi(p, needsProfile) : null
                 const bd = p.breakdown
                 return (
@@ -679,7 +726,9 @@ export default function MapPage() {
                           {match && <span className="font-semibold" style={{ color: GRADE_COLOR[match.grade] }}> · {match.score}% match</span>}
                         </p>
                         {desc && <p className="mt-1.5 text-[13px] leading-snug text-ink">{desc.summary}</p>}
-                        {bd.confidence === 'low' || bd.confidence === 'none' ? (
+                        {fromTiles ? (
+                          <p className="mt-1 text-[11px] text-muted">Access not yet assessed — open Details to load it.</p>
+                        ) : bd.confidence === 'low' || bd.confidence === 'none' ? (
                           <p className="mt-1 text-[11px] text-muted">Score estimated from the type of place — little mapped data.</p>
                         ) : null}
                         <div className="mt-2.5 flex flex-wrap items-center gap-2">

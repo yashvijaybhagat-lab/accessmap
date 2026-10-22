@@ -33,9 +33,10 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
       ? `/place/${p.id}`
       : `/place/${p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}`
 
+  const fromTiles = selected.kind === 'poi' && selected.data.id.startsWith('tile-')
   const desc = useMemo(
-    () => (selected.kind === 'poi' && selected.data.tags ? describePlace(selected.data.tags, selected.data.category) : null),
-    [selected],
+    () => (selected.kind === 'poi' && selected.data.tags && !fromTiles ? describePlace(selected.data.tags, selected.data.category) : null),
+    [selected, fromTiles],
   )
   const score = selected.kind === 'poi'
     ? selected.data.accessScore
@@ -86,6 +87,12 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
         </ul>
       ) : null}
 
+      {fromTiles && (
+        <p className="mt-3 rounded-xl bg-[#e8f0fe] px-3 py-2 text-[13px] text-[#0b3d91]" role="note">
+          Accessibility details for this place haven't loaded yet (the live database is busy). Open <strong>Full details</strong> to fetch them.
+        </p>
+      )}
+
       {desc && (
         <div className="mt-4">
           <AccessDescription name={p.name} desc={desc} compact />
@@ -117,7 +124,7 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
           <Accessibility size={16} aria-hidden="true" /> Full details
         </Link>
       </div>
-      {selected.kind === 'poi' && !selected.data.id.startsWith('placeholder') && (
+      {selected.kind === 'poi' && selected.data.osmId && !selected.data.id.startsWith('placeholder') && (
         <a
           href={`https://www.openstreetmap.org/${selected.data.osmId}`}
           target="_blank" rel="noreferrer"

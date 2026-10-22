@@ -6,14 +6,15 @@ import { type Poi } from '../lib/overpass'
 import { scoreColor, scoreWord } from './ScoreRing'
 import type { TransitLine, TransitStation, WalkingPath } from '../lib/transit'
 import { createMap, moveTo, setGeo, setMapMode, whenReady, webglSupported, maplibregl } from '../lib/map3d'
-import { useA11y } from '../lib/a11y'
+import { useA11y, motionReduced } from '../lib/a11y'
 
 interface Props {
   places: Place[]
   pois?: Poi[]
   alertPlaceIds: Set<string>
   userLocation?: { lat: number; lng: number; accuracy?: number } | null
-  focus?: { lat: number; lng: number; zoom?: number } | null
+  /** Camera target. `follow` = a live GPS update: glide smoothly and keep the current zoom. */
+  focus?: { lat: number; lng: number; zoom?: number; follow?: boolean } | null
   selectedId?: string | null
   onSelect?: (place: Place) => void
   onPoiSelect?: (poi: Poi) => void
@@ -26,9 +27,25 @@ interface Props {
   controls?: ReactNode
   /** CSS bottom offset for the control stack. */
   controlsBottom?: string
+  /** Called once the map is ready — lets the page query the map (e.g. POIs in view). */
+  onReady?: (map: MlMap) => void
+  /** The user dragged / zoomed / rotated the map themselves (stops "follow me"). */
+  onUserGesture?: () => void
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
+
+/** Polygon approximating a circle of `radiusM` metres (for the GPS accuracy halo). */
+function accuracyCircle(lat: number, lng: number, radiusM: number): GeoJSON.Feature<GeoJSON.Polygon> {
+  const pts: [number, number][] = []
+  const dLat = radiusM / 110540
+  const dLng = radiusM / (111320 * Math.cos((lat * Math.PI) / 180))
+  for (let i = 0; i <= 48; i++) {
+    const a = (i / 48) * 2 * Math.PI
+    pts.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)])
+  }
+  return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [pts] } }
+}
 
 // One decimal so the number always agrees with the colour band (7.7 must not read as "8").
 const pinScore = (n: number) => (n >= 10 ? '10' : n.toFixed(1))
@@ -54,15 +71,15 @@ function pinEl(opts: { color: string; text: string; label: string; ring?: string
 
 function MapView({
   places, pois = [], alertPlaceIds, userLocation, focus, selectedId, onSelect, onPoiSelect, onCenterChange,
-  className, transitLines = [], transitStations = [], walkingPaths = [], controls, controlsBottom,
+  className, transitLines = [], transitStations = [], walkingPaths = [], controls, controlsBottom, onReady, onUserGesture,
 }: Props) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
   const markers = useRef<Marker[]>([])
   const stationMarkers = useRef<Marker[]>([])
   const userMarker = useRef<Marker | null>(null)
-  const cb = useRef({ onSelect, onPoiSelect, onCenterChange })
-  cb.current = { onSelect, onPoiSelect, onCenterChange }
+  const cb = useRef({ onSelect, onPoiSelect, onCenterChange, onReady, onUserGesture })
+  cb.current = { onSelect, onPoiSelect, onCenterChange, onReady, onUserGesture }
   const [failed, setFailed] = useState(false)
   const [ready, setReady] = useState(false)
   const [bearing, setBearing] = useState(0)
@@ -83,7 +100,12 @@ function MapView({
     const emit = () => { const c = map.getCenter(); cb.current.onCenterChange?.(c.lat, c.lng) }
     map.on('moveend', emit)
     map.on('rotate', () => setBearing(map.getBearing()))
-    map.on('load', () => { setReady(true); emit() })
+    map.on('load', () => { setReady(true); emit(); cb.current.onReady?.(map) })
+    // Only real user input carries an originalEvent — programmatic camera moves don't.
+    const gesture = (e: { originalEvent?: unknown }) => { if (e.originalEvent) cb.current.onUserGesture?.() }
+    map.on('dragstart', gesture)
+    map.on('zoomstart', gesture)
+    map.on('rotatestart', gesture)
     map.on('error', (e) => console.warn('[map]', e?.error?.message ?? e))
     const ro = new ResizeObserver(() => map.resize())
     ro.observe(elRef.current)
@@ -131,25 +153,43 @@ function MapView({
     })
   }, [places, pois, alertPlaceIds, selectedId, colorSafe])
 
-  // User location — pulsing dot with accuracy halo
+  // User location — pulsing dot plus a halo showing how accurate the fix is
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    if (!userLocation) { userMarker.current?.remove(); userMarker.current = null; return }
+    if (!userLocation) {
+      userMarker.current?.remove(); userMarker.current = null
+      whenReady(map, () => setGeo(map, 'am-accuracy', { type: 'FeatureCollection', features: [] }))
+      return
+    }
     if (!userMarker.current) {
       const el = document.createElement('div')
       el.className = 'user-dot'
       el.setAttribute('role', 'img')
-      el.setAttribute('aria-label', 'Your location')
       el.innerHTML = '<span class="user-dot-pulse"></span><span class="user-dot-core"></span>'
       userMarker.current = new maplibregl.Marker({ element: el }).setLngLat([userLocation.lng, userLocation.lat]).addTo(map)
     } else {
       userMarker.current.setLngLat([userLocation.lng, userLocation.lat])
     }
-  }, [userLocation])
+    const acc = userLocation.accuracy
+    userMarker.current.getElement().setAttribute('aria-label', `Your location${acc ? `, accurate to about ${Math.round(acc)} metres` : ''}`)
+    whenReady(map, () => {
+      setGeo(map, 'am-accuracy', {
+        type: 'FeatureCollection',
+        features: acc && acc > 12 ? [accuracyCircle(userLocation.lat, userLocation.lng, acc)] : [],
+      })
+      if (!map.getLayer('am-accuracy')) {
+        map.addLayer({ id: 'am-accuracy', type: 'fill', source: 'am-accuracy', paint: { 'fill-color': '#1a73e8', 'fill-opacity': 0.12 } })
+        map.addLayer({ id: 'am-accuracy-edge', type: 'line', source: 'am-accuracy', paint: { 'line-color': '#1a73e8', 'line-opacity': 0.45, 'line-width': 1.5 } })
+      }
+    })
+  }, [userLocation, ready])
 
   useEffect(() => {
-    if (focus && mapRef.current) moveTo(mapRef.current, focus.lat, focus.lng, focus.zoom ?? 16)
+    const map = mapRef.current
+    if (!focus || !map) return
+    if (focus.follow) map.easeTo({ center: [focus.lng, focus.lat], duration: motionReduced() ? 0 : 600 })
+    else moveTo(map, focus.lat, focus.lng, focus.zoom ?? 16)
   }, [focus])
 
   // Transit lines + walking paths as styled GeoJSON line layers
