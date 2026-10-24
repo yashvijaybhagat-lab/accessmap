@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { motion, useDragControls } from 'motion/react'
+import { useReducedMotion } from '../lib/useAppMotion'
 import {
   MapPin as MapPinIcon, Flag, Star, Route as RouteIcon,
   ShieldCheck, ShieldAlert, Bookmark, ExternalLink, BadgeCheck,
@@ -18,6 +20,7 @@ import ReviewForm from '../components/ReviewForm'
 import { getPlace, getReviews, getAlerts, resolveAlert, getSpecs } from '../lib/data'
 import { useStore } from '../store/useStore'
 import { scorePlace, hasProfile, beforeYouGo } from '../lib/compatibility'
+import { withDemoPlace } from '../lib/demoOverrides'
 import MatchBadge from '../components/MatchBadge'
 import SpecsPanel from '../components/SpecsPanel'
 import SpecsForm from '../components/SpecsForm'
@@ -69,7 +72,17 @@ export default function PlaceDetail() {
   const user = useStore((s) => s.user)
   const toggleSaved = useStore((s) => s.toggleSaved)
   const needsProfile = useStore((s) => s.needsProfile)
+  const flyTo = useStore((s) => s.flyTo)
   const saved = user?.savedPlaces.includes(id)
+
+  // Pull the top handle down to return to the map, centred on this place
+  const navigate = useNavigate()
+  const reduced = useReducedMotion()
+  const dragControls = useDragControls()
+  function backToMap() {
+    if (place) flyTo({ lat: place.lat, lng: place.lng, zoom: 17 })
+    navigate('/')
+  }
 
   const osmAbort = useRef<AbortController | null>(null)
 
@@ -110,6 +123,7 @@ export default function PlaceDetail() {
         })
         setOsmLoading(true)
         getSpecs(id).then(s => { if (!ac.signal.aborted) setSpecs(s) })
+        getReviews(id).then(r => { if (!ac.signal.aborted) setReviews(r) }).catch(() => { /* no reviews yet */ })
         const osm = searchParams.get('osm') ?? (/^(node|way|relation)-\d+$/.test(id) ? id.replace('-', '/') : undefined)
         const onQuick = (d: OsmData) => {
           if (ac.signal.aborted) return
@@ -187,6 +201,26 @@ export default function PlaceDetail() {
 
   return (
     <Layout>
+      <motion.div
+        drag={reduced ? false : 'y'}
+        dragListener={false}
+        dragControls={dragControls}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 100 || info.velocity.y > 500) backToMap()
+        }}
+      >
+      {/* Grab handle — pull down to return to the map */}
+      <div
+        onPointerDown={(e) => !reduced && dragControls.start(e)}
+        className="-mt-2 mb-3 flex cursor-grab touch-none flex-col items-center pb-1 pt-1 active:cursor-grabbing"
+        aria-hidden="true"
+      >
+        <span className="h-1.5 w-10 rounded-full bg-[#d1d5db]" />
+        <span className="mt-1.5 text-[11px] font-semibold text-muted">Pull down for map</span>
+      </div>
+
       {alerts.map((a) => (
         <div key={a.id} className="mb-3"><AlertBanner alert={a} onResolve={onResolve} /></div>
       ))}
@@ -295,8 +329,9 @@ export default function PlaceDetail() {
 
       {/* ── Personal match ──────────────────────────────────────── */}
       {hasProfile(needsProfile) && (() => {
-        const match = scorePlace(place, needsProfile)
-        const briefing = beforeYouGo(place, needsProfile)
+        const matchPlace = withDemoPlace(place)
+        const match = scorePlace(matchPlace, needsProfile)
+        const briefing = beforeYouGo(matchPlace, needsProfile)
         const firstName = needsProfile.name ? needsProfile.name.split(' ')[0] : null
         return (
           <section className="mb-6 space-y-3" aria-label="Your personal accessibility match">
@@ -615,7 +650,7 @@ export default function PlaceDetail() {
 
       {/* ── Actions ─────────────────────────────────────────────── */}
       <div className="mb-6 flex flex-wrap gap-3">
-        {!osmOnlyMode && <button onClick={() => setShowReview(true)} className="btn-primary"><Star size={16} /> Write a review</button>}
+        <button onClick={() => setShowReview(true)} className="btn-primary"><Star size={16} /> Write a review</button>
         <button onClick={() => setShowSpecsForm(true)} className="btn-ghost"><CheckCircle2 size={16} /> Add specs</button>
         <button onClick={() => setShowReport(true)} className="btn-alert"><Flag size={16} /> Report issue</button>
         <Link to={routeHref(place.lat, place.lng, place.name)} className="btn-ghost"><RouteIcon size={16} /> Accessible route</Link>
@@ -705,12 +740,13 @@ export default function PlaceDetail() {
           ))}
         </div>
       </section>
+      </motion.div>
 
       <Modal open={showReport} onClose={() => setShowReport(false)} title="Report an issue">
         <ReportForm placeId={id} onDone={() => { setShowReport(false); load() }} />
       </Modal>
       <Modal open={showReview} onClose={() => setShowReview(false)} title="Submit a review">
-        <ReviewForm placeId={id} onDone={() => { setShowReview(false); load() }} />
+        <ReviewForm placeId={id} placeName={place.name} onDone={() => { setShowReview(false); load() }} />
       </Modal>
       <Modal open={showSpecsForm} onClose={() => setShowSpecsForm(false)} title="Add physical access specs">
         <SpecsForm placeId={id} onDone={() => { setShowSpecsForm(false); load() }} />

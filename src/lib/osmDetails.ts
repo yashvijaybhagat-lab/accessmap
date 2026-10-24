@@ -1,5 +1,6 @@
 import type { AccessSpecs } from '../types'
 import { deriveAccess, overpassQuery as hedgedOverpass, type ScoreBreakdown } from './overpass'
+import { withDemoOverrides } from './demoOverrides'
 import { nominatimLookup, nominatimByName } from './nominatimPois'
 import { fetchWikiImage } from './wikipedia'
 
@@ -245,7 +246,7 @@ async function buildOsmData(mainEl: { type: string; id: string | number }, mainT
 
   // Merge sub-element tags into main tags for richer data
   const subTags = subElements.map((el: any) => el.tags ?? {} as Record<string, string>)
-  const t = mergeTags(mainTags, subTags)
+  const t = withDemoOverrides(mergeTags(mainTags, subTags))
 
   // Run scoring engine on merged tags
   const derived = deriveAccess(t)

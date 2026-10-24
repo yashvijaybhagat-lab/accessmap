@@ -22,16 +22,21 @@ export function routeHref(lat: number, lng: number, name: string) {
   return `/route?to=${lat.toFixed(6)},${lng.toFixed(6)}&name=${encodeURIComponent(name)}`
 }
 
+/** Link to the full place-detail page for a tapped pin. */
+export function placeDetailHref(selected: Selected) {
+  const p = selected.data
+  return selected.kind === 'place'
+    ? `/place/${p.id}`
+    : `/place/${(p as Poi).osmId ? (p as Poi).osmId.replace('/', '-') : p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}${(p as Poi).osmId ? `&osm=${(p as Poi).osmId}` : ''}`
+}
+
 /**
  * Contents of the bottom sheet shown when a map pin is tapped. Works for both
  * curated places and OSM POIs. "Full details" navigates client-side.
  */
 export default function PlaceSheet({ selected, onClose }: { selected: Selected; onClose: () => void }) {
   const p = selected.data
-  const detailHref =
-    selected.kind === 'place'
-      ? `/place/${p.id}`
-      : `/place/${(p as Poi).osmId ? (p as Poi).osmId.replace('/', '-') : p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}${(p as Poi).osmId ? `&osm=${(p as Poi).osmId}` : ''}`
+  const detailHref = placeDetailHref(selected)
 
   const fromTiles = selected.kind === 'poi' && selected.data.id.startsWith('tile-') && !selected.data.communityReports
   const desc = useMemo(

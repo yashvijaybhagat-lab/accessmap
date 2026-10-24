@@ -13,15 +13,20 @@ interface Props {
   showHeader?: boolean
   /** Extra classes for the panel (e.g. max-width on desktop). */
   className?: string
+  /** When set, dragging the handle up calls this (e.g. open a full-screen view). */
+  onExpand?: () => void
+  /** Hint shown under the grab handle when `onExpand` is set. */
+  expandHint?: string
   children: ReactNode
 }
 
 /**
  * A sheet that slides up from the bottom of the screen — the native-app
  * replacement for a centered modal dialog. Drag the grab handle down to
- * dismiss. Respects the bottom safe-area inset and reduced-motion.
+ * dismiss, or up to expand when `onExpand` is given. Respects the bottom
+ * safe-area inset and reduced-motion.
  */
-export default function BottomSheet({ open, onClose, title, showHeader = true, className = '', children }: Props) {
+export default function BottomSheet({ open, onClose, title, showHeader = true, className = '', onExpand, expandHint, children }: Props) {
   const reduced = useReducedMotion()
   const trapRef = useFocusTrap<HTMLDivElement>(open)
   const dragControls = useDragControls()
@@ -68,18 +73,22 @@ export default function BottomSheet({ open, onClose, title, showHeader = true, c
             dragListener={false}
             dragControls={dragControls}
             dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.6 }}
+            dragElastic={{ top: onExpand ? 0.35 : 0, bottom: 0.6 }}
             onDragEnd={(_, info) => {
               if (info.offset.y > 110 || info.velocity.y > 550) onClose()
+              else if (onExpand && (info.offset.y < -60 || info.velocity.y < -500)) onExpand()
             }}
           >
             {/* Grab handle — the drag affordance */}
             <div
               onPointerDown={(e) => !reduced && dragControls.start(e)}
-              className="flex shrink-0 cursor-grab touch-none justify-center pt-2.5 pb-2 active:cursor-grabbing"
+              className={`flex shrink-0 cursor-grab touch-none flex-col items-center active:cursor-grabbing ${onExpand ? 'pt-2.5 pb-3' : 'pt-2.5 pb-2'}`}
               aria-hidden="true"
             >
               <span className="h-1.5 w-10 rounded-full bg-[#d1d5db]" />
+              {onExpand && expandHint && (
+                <span className="mt-1.5 text-[11px] font-semibold text-muted">{expandHint}</span>
+              )}
             </div>
 
             {showHeader && title && (

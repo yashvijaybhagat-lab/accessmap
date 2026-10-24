@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Loader2, X, LocateFixed, Accessibility, MapPin as MapPinIcon, AlertTriangle, Route as RouteIcon,
   Navigation, Navigation2, ChevronRight, Info, RefreshCw, Eye, Ear, Brain, TrainFront, Footprints, List, Sparkles,
@@ -7,7 +7,7 @@ import {
 import BrandPin from '../components/MapPin'
 import MapView from '../components/MapView'
 import BottomSheet from '../components/BottomSheet'
-import PlaceSheet, { type Selected, routeHref } from '../components/PlaceSheet'
+import PlaceSheet, { type Selected, routeHref, placeDetailHref } from '../components/PlaceSheet'
 import { scoreColor, scoreWord } from '../components/ScoreRing'
 import { getPlaces, getAlerts, getSpecsFor } from '../lib/data'
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
@@ -144,8 +144,14 @@ export default function MapPage() {
   const mapTarget = useStore((s) => s.mapTarget)
   const clearMapTarget = useStore((s) => s.clearMapTarget)
 
-  // Pin-tap bottom sheet
+  // Pin-tap bottom sheet — drag it up to open the full place page
   const [selected, setSelected] = useState<Selected | null>(null)
+  const navigate = useNavigate()
+  const openSelectedDetails = useCallback(() => {
+    if (!selected) return
+    navigate(placeDetailHref(selected))
+    setSelected(null)
+  }, [selected, navigate])
 
   const [showIntro, setShowIntro] = useState(() => {
     try { return sessionStorage.getItem('am.introSeen') !== '1' } catch { return true }
@@ -853,7 +859,13 @@ export default function MapPage() {
       </div>
 
       {/* Pin-tap place details — slides up from the bottom */}
-      <BottomSheet open={!!selected} onClose={() => setSelected(null)} showHeader={false}>
+      <BottomSheet
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        showHeader={false}
+        onExpand={openSelectedDetails}
+        expandHint="Swipe up for full details"
+      >
         {selected && <PlaceSheet selected={selected} onClose={() => setSelected(null)} />}
       </BottomSheet>
 

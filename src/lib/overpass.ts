@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { spaced } from './rateLimit'
 import { batchWikiImages } from './wikipedia'
+import { withDemoOverrides } from './demoOverrides'
 
 export interface ScoreBreakdown {
   base: number | null
@@ -155,6 +156,7 @@ export function deriveAccess(tags: Record<string, string>, category?: CategoryKe
   'id' | 'osmId' | 'name' | 'lat' | 'lng' | 'category' | 'address'
   | 'imageUrl' | 'openingHours' | 'phone' | 'website' | 'wheelchairDescription'
 > {
+  tags = withDemoOverrides(tags)
   const wRaw = (tags.wheelchair || '').toLowerCase()
   const wheelchair = (['yes', 'limited', 'no'].includes(wRaw) ? wRaw : undefined) as Poi['wheelchair']
   const accessibleToilet = (tags['toilets:wheelchair'] || tags['wheelchair:toilets'] || '').toLowerCase() === 'yes'

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import PhotoUpload from './PhotoUpload'
 import { scoreColor } from './ScoreRing'
@@ -13,7 +13,7 @@ const DIMS: { key: Dimension; label: string }[] = [
   { key: 'vision', label: 'Vision' },
 ]
 
-export default function ReviewForm({ placeId, onDone }: { placeId?: string; onDone?: () => void }) {
+export default function ReviewForm({ placeId, placeName, onDone }: { placeId?: string; placeName?: string; onDone?: () => void }) {
   const user = useStore((s) => s.user)
   const [places, setPlaces] = useState<Place[]>([])
   const [selected, setSelected] = useState(placeId ?? '')
@@ -26,10 +26,17 @@ export default function ReviewForm({ placeId, onDone }: { placeId?: string; onDo
 
   useEffect(() => { if (!placeId) getPlaces().then(setPlaces) }, [placeId])
 
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
   const valid = selected && body.trim().length >= 20
 
   async function submit() {
-    if (!valid) return
+    // Keep the button clickable and explain what's missing instead of silently disabling it
+    if (!selected) { setErr('Please choose a place to review.'); return }
+    if (body.trim().length < 20) {
+      setErr(`Please write at least 20 characters about your visit (${20 - body.trim().length} more to go).`)
+      bodyRef.current?.focus()
+      return
+    }
     setBusy(true); setErr('')
     try {
       await addReview({
@@ -41,7 +48,7 @@ export default function ReviewForm({ placeId, onDone }: { placeId?: string; onDo
         body: body.trim(),
         photos: photos.map((p) => p.url),
         verified: photos.length > 0 && photos.every((p) => p.verified),
-        placeName: places.find(p => p.id === selected)?.name,
+        placeName: placeName ?? places.find(p => p.id === selected)?.name,
       })
       setDone(true)
       setTimeout(() => onDone?.(), 900)
@@ -87,8 +94,9 @@ export default function ReviewForm({ placeId, onDone }: { placeId?: string; onDo
       <label className="block">
         <span className="label">Your review (min 20 chars)</span>
         <textarea
+          ref={bodyRef}
           className="input mt-1 min-h-24" value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => { setBody(e.target.value); if (err) setErr('') }}
           placeholder="What was the accessibility experience like?"
         />
         <span className="label">{body.trim().length} / 20</span>
@@ -102,7 +110,7 @@ export default function ReviewForm({ placeId, onDone }: { placeId?: string; onDo
       </div>
 
       {err && <p role="alert" className="text-sm text-alert">{err}</p>}
-      <button disabled={!valid || busy} onClick={submit} className="btn-primary w-full disabled:opacity-50">
+      <button disabled={busy} onClick={submit} className={`btn-primary w-full disabled:opacity-50 ${valid ? '' : 'opacity-70'}`}>
         {busy ? <Loader2 className="animate-spin" size={16} /> : null} Submit review
       </button>
     </div>

@@ -191,7 +191,7 @@ export function scorePlace(place: Place, profile: NeedsProfile): CompatibilityRe
   // Fallback: if profile has no specific needs set, return neutral
   if (weight === 0) return { score: 0, grade: 'good', warnings: [], highlights: [] }
 
-  const score = Math.round(total / weight)
+  const score = Math.round((total / weight) * 100)
   const grade: CompatibilityResult['grade'] =
     score >= 80 ? 'great' : score >= 60 ? 'good' : score >= 40 ? 'limited' : 'poor'
 
@@ -227,7 +227,7 @@ export function scorePoi(poi: Poi, profile: NeedsProfile): CompatibilityResult {
 
   if (weight === 0) return { score: 0, grade: 'good', warnings: [], highlights: [] }
 
-  const score = Math.round(total / weight)
+  const score = Math.round((total / weight) * 100)
   const grade: CompatibilityResult['grade'] =
     score >= 80 ? 'great' : score >= 60 ? 'good' : score >= 40 ? 'limited' : 'poor'
 
@@ -242,7 +242,7 @@ export const GRADE_COLOR: Record<CompatibilityResult['grade'], string> = {
 }
 
 export const GRADE_LABEL: Record<CompatibilityResult['grade'], string> = {
-  great: 'Great match',
+  great: 'Excellent match',
   good: 'Good match',
   limited: 'Limited match',
   poor: 'Poor match',

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#070B18" />
+<title>AccessMap — Thank You</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  /* Design tokens — mirrors src/index.css, tailwind.config.js and the Home.tsx hero */
+  :root {
+    --navy: #070b18;
+    --primary: #1a73e8;
+    --teal: #0abfbf;
+    --violet: #7c3aed;
+    --orange: #f97316;
+    --alert: #ea4335;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--navy);
+    color: #fff;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.012em;
+    overflow-x: hidden;
+  }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+
+  .slide {
+    position: relative; overflow: hidden;
+    min-height: 100vh; min-height: 100svh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    padding: calc(env(safe-area-inset-top) + 32px) 16px calc(env(safe-area-inset-bottom) + 32px);
+  }
+
+  /* Aurora background (same palette as the Home hero) */
+  .aurora { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .aurora span { position: absolute; border-radius: 50%; filter: blur(80px); opacity: .5; animation: drift 18s ease-in-out infinite alternate; }
+  .aurora span:nth-child(1) { width: 440px; height: 440px; background: var(--teal);    top: -180px; left: -160px; }
+  .aurora span:nth-child(2) { width: 400px; height: 400px; background: var(--primary); top: 30%;    right: -200px; animation-delay: -6s; }
+  .aurora span:nth-child(3) { width: 380px; height: 380px; background: var(--violet);  bottom: -220px; left: 10%; opacity: .38; animation-delay: -12s; }
+
+  /* Floating map pins */
+  .pins { position: absolute; inset: 0; pointer-events: none; }
+  .pins svg { position: absolute; width: 22px; height: 22px; opacity: .55; animation: float 7s ease-in-out infinite; }
+
+  .content { position: relative; z-index: 1; width: 100%; max-width: 720px; }
+
+  .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: -0.03em; animation: rise .7s ease-out both; }
+  .brand svg { width: 28px; height: 28px; }
+
+  .title {
+    margin: 22px 0 0;
+    font-size: clamp(64px, min(20vw, 17vh), 168px);
+    font-weight: 800;
+    letter-spacing: -0.055em;
+    line-height: 1;
+    padding-bottom: 0.08em; /* keeps the "y" descender inside the gradient clip */
+    background: linear-gradient(100deg, #ffffff 0%, #ffffff 36%, #7df9ff 56%, var(--teal) 72%, var(--primary) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: rise .8s .1s ease-out both, shine 7s 1s ease-in-out infinite alternate;
+  }
+  .sub { margin: 18px 0 0; font-size: clamp(21px, 5.8vw, 32px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.25; animation: rise .8s .25s ease-out both; }
+  .sub em { font-style: normal; color: var(--teal); }
+
+  .recap { margin: 28px auto 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 460px; animation: rise .8s .4s ease-out both; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.07);
+    font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85);
+  }
+
+  .divider { width: 48px; height: 3px; border-radius: 99px; background: var(--teal); margin: 30px auto 0; animation: rise .8s .55s ease-out both; }
+
+  .tagline { margin: 22px 0 0; font-size: 16px; line-height: 1.6; color: rgba(255,255,255,0.62); animation: rise .8s .65s ease-out both; }
+  .tagline b { color: #fff; font-weight: 600; }
+
+  .questions {
+    margin-top: 26px; display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 22px; border-radius: 999px;
+    background: var(--primary); color: #fff; font-size: 15px; font-weight: 600;
+    box-shadow: 0 10px 24px -6px rgba(26,115,232,.55);
+    animation: rise .8s .8s ease-out both;
+  }
+
+  @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(40px, 30px) scale(1.15); } }
+  @keyframes shine { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+  @keyframes rise  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+
+  @media (min-width: 640px) {
+    .tagline { font-size: 18px; }
+    .recap { max-width: 640px; }
+  }
+  /* Short screens (small phones, laptops, projectors): tighten vertical spacing so it fits on one screen */
+  @media (max-height: 800px) {
+    .title { margin-top: 14px; }
+    .sub { margin-top: 12px; }
+    .recap { margin-top: 20px; }
+    .divider { margin-top: 20px; }
+    .tagline { margin-top: 16px; }
+    .questions { margin-top: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<!-- Icon sprite (Lucide paths) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="pin" viewBox="0 0 24 24"><path d="M12 2C8 2 5 5 5 9c0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7Z" fill="#0ABFBF" stroke="none"/><circle cx="12" cy="9" r="2.6" fill="#070B18" stroke="none"/></symbol>
+  <symbol id="map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15M9 3.236v15"/></symbol>
+  <symbol id="route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+  <symbol id="bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/></symbol>
+  <symbol id="users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+</svg>
+
+<main class="slide" aria-labelledby="thanks">
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <div class="pins" aria-hidden="true">
+    <svg style="left:8%;  top:5%;  animation-delay:0s"><use href="#pin"/></svg>
+    <svg style="left:86%; top:4%;  animation-delay:-2s; width:18px; height:18px"><use href="#pin"/></svg>
+    <svg style="left:62%; top:8%;  animation-delay:-4s; width:14px; height:14px"><use href="#pin"/></svg>
+    <svg style="left:10%; top:93%; animation-delay:-1s; width:16px; height:16px"><use href="#pin"/></svg>
+    <svg style="left:80%; top:91%; animation-delay:-3s"><use href="#pin"/></svg>
+    <svg style="left:44%; top:95%; animation-delay:-5s; width:14px; height:14px"><use href="#pin"/></svg>
+  </div>
+
+  <div class="content">
+    <div class="brand"><svg aria-hidden="true"><use href="#pin"/></svg>AccessMap</div>
+
+    <h1 id="thanks" class="title">Thank you</h1>
+    <p class="sub">We hope you enjoyed<br /><em>AccessMap.</em></p>
+
+    <ul class="recap" aria-label="What you saw today" style="list-style:none;padding:0">
+      <li class="chip"><svg class="i" style="color:var(--teal)"><use href="#map"/></svg>Accessibility map</li>
+      <li class="chip"><svg class="i" style="color:#5b9cf5"><use href="#route"/></svg>Step-free routes</li>
+      <li class="chip"><svg class="i" style="color:#f28b82"><use href="#bell"/></svg>Live alerts</li>
+      <li class="chip"><svg class="i" style="color:#a78bfa"><use href="#camera"/></svg>AI-checked photos</li>
+      <li class="chip"><svg class="i" style="color:var(--orange)"><use href="#sliders"/></svg>Made to fit you</li>
+      <li class="chip"><svg class="i" style="color:#4ade80"><use href="#users"/></svg>Community reviews</li>
+    </ul>
+
+    <div class="divider" aria-hidden="true"></div>
+
+    <p class="tagline"><b>The physical world, mapped for everyone.</b><br />Know before you go.</p>
+
+    <div class="questions"><svg class="i"><use href="#chat"/></svg>Questions?</div>
+  </div>
+</main>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import { deriveAccess, type CategoryKey } from './overpass'
+import { withDemoOverrides } from './demoOverrides'
 
 /* ------------------------------------------------------------------ *
  * Plain-language accessibility descriptions built from OpenStreetMap
@@ -28,7 +29,7 @@ const inches = (cm: number) => Math.round(cm / 2.54)
 const fmtCm = (cm: number) => `${cm} cm (${inches(cm)} in)`
 
 export function describePlace(tags: Record<string, string>, category?: CategoryKey): PlaceDescription {
-  const t = tags
+  const t = withDemoOverrides(tags)
   const d = deriveAccess(t, category)
   const typical = (label: string) => d.breakdown.bonuses.some((b) => b.label.startsWith(label) && b.label.includes('typical'))
   const unknowns: string[] = []
