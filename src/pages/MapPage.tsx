@@ -9,11 +9,12 @@ import MapView from '../components/MapView'
 import BottomSheet from '../components/BottomSheet'
 import PlaceSheet, { type Selected, routeHref } from '../components/PlaceSheet'
 import { scoreColor, scoreWord } from '../components/ScoreRing'
-import { getPlaces, getAlerts } from '../lib/data'
+import { getPlaces, getAlerts, getSpecsFor } from '../lib/data'
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
-import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, placeholderPois, type Poi, type CategoryKey } from '../lib/overpass'
-import { poisFromTiles, TILE_POI_MIN_ZOOM } from '../lib/tilePois'
-import { FIREBASE_ENABLED } from '../lib/firebase'
+import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, type Poi, type CategoryKey } from '../lib/overpass'
+import { nominatimNearby, nominatimLookupMany } from '../lib/nominatimPois'
+import { poisFromTiles, placesAround, TILE_POI_MIN_ZOOM } from '../lib/tilePois'
+import { applyCommunitySpecs } from '../lib/community'
 import type { Map as MlMap } from 'maplibre-gl'
 import { getNearbyTransit, getNearbyWalkingPaths, type TransitLine, type TransitStation, type WalkingPath } from '../lib/transit'
 import { batchWikiImages } from '../lib/wikipedia'
@@ -21,7 +22,7 @@ import { describePlace } from '../lib/describe'
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { scorePlace, scorePoi, hasProfile, GRADE_COLOR } from '../lib/compatibility'
 import { useStore } from '../store/useStore'
-import type { Place, Alert, Dimension } from '../types'
+import type { Place, Alert, Dimension, AccessSpecs } from '../types'
 
 // Disability-type map filters — each predicate decides whether a POI / place is a match
 const DIS_FILTERS: {
@@ -48,6 +49,40 @@ const DIS_FILTERS: {
   },
 ]
 
+/** Merge two lists of real places by OSM id; `preferIncoming` = incoming has the fuller tag set. */
+function mergePois(existing: Poi[], incoming: Poi[], preferIncoming: boolean): Poi[] {
+  const byId = new Map(existing.map((p) => [p.osmId, p]))
+  for (const p of incoming) {
+    const prev = byId.get(p.osmId)
+    if (!prev || preferIncoming) byId.set(p.osmId, prev?.imageUrl && !p.imageUrl ? { ...p, imageUrl: prev.imageUrl } : p)
+  }
+  return [...byId.values()]
+}
+
+/** 2 = real rating (mapped in OSM or reported by users), 1 = estimated from the type of place, 0 = not rated. */
+function ratingTier(p: Poi): 0 | 1 | 2 {
+  if (p.accessScore == null) return 0
+  return p.communityReports || p.breakdown.confidence === 'high' || p.breakdown.confidence === 'medium' ? 2 : 1
+}
+
+/** The id AccessMap stores community data under for a place ("node-123"). */
+const placeKey = (p: Poi) => (p.osmId ? p.osmId.replace('/', '-') : p.id)
+
+/** Real places plus any map-tile places they don't already cover (same OSM id, or same name within ~150 m). */
+function withUnmatchedTiles(real: Poi[], tiles: Poi[]): Poi[] {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const ids = new Set(real.map((p) => p.osmId).filter(Boolean))
+  const extra: Poi[] = []
+  for (const t of tiles) {
+    if (t.osmId && ids.has(t.osmId)) continue
+    if (real.some((r) => norm(r.name) === norm(t.name) && haversineKm([r.lat, r.lng], [t.lat, t.lng]) < 0.15)) continue
+    if (t.osmId) ids.add(t.osmId)
+    else if (extra.some((e) => e.id === t.id)) continue
+    extra.push(t)
+  }
+  return [...real, ...extra]
+}
+
 export default function MapPage() {
   const [places, setPlaces] = useState<Place[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
@@ -62,7 +97,10 @@ export default function MapPage() {
   const mapRef = useRef<MlMap | null>(null)
   const [viewCenter, setViewCenter] = useState<[number, number] | null>(null)
   const [lastSearch, setLastSearch] = useState<{ cat: CategoryKey; center: [number, number] } | null>(null)
-  const [dataSource, setDataSource] = useState<'live' | 'tiles' | 'samples' | 'unavailable' | 'zoom'>('live')
+  const [dataSource, setDataSource] = useState<'live' | 'tiles' | 'unavailable' | 'zoom'>('live')
+  // True while slower sources are still adding places to an already-visible list.
+  const [refining, setRefining] = useState(false)
+  const poiCache = useRef(new Map<string, Poi[]>())
   // centerRef tracks map pan position without triggering re-renders
   // center state is only updated when we actually need to run a search
   const centerRef = useRef<[number, number] | null>(null)
@@ -263,34 +301,86 @@ export default function MapPage() {
   }, [q])
 
   async function searchCategory(cat: CategoryKey, c: [number, number]) {
-    setActiveCat(cat); setLoadingPois(true); setPanelOpen(true); setPois([])
+    setActiveCat(cat); setPanelOpen(true)
     setLastSearch({ cat, center: c })
     poiAbort.current?.abort()
     const ac = new AbortController(); poiAbort.current = ac
-    try {
-      let result = await nearbyByCategory(c, cat, 5000, ac.signal)
-      if (!result.unavailable && result.pois.length === 0) result = await nearbyByCategory(c, cat, 15000, ac.signal)
+
+    // Same category in (roughly) the same area this session → instant.
+    const key = `${cat}|${c[0].toFixed(2)}|${c[1].toFixed(2)}`
+    const cached = poiCache.current.get(key)
+    if (cached) {
+      setPois(cached); setDataSource('live'); setLoadingPois(false); setRefining(false)
+      return
+    }
+    setPois([]); setLoadingPois(true); setRefining(true)
+
+    // Real places that are already in the map's tiles appear immediately (no access data yet);
+    // Nominatim (~0.5 s) and Overpass (slower, most complete) then fill in rated places.
+    const map = mapRef.current
+    const tiles = map && map.getZoom() >= TILE_POI_MIN_ZOOM ? poisFromTiles(map, cat, c, 5000) : []
+    let real: Poi[] = []       // places with their real OSM tags
+    let swept: Poi[] = []      // every named place in the area, from the street-level map tiles
+    let community = new Map<string, AccessSpecs[]>()
+    const view = () => {
+      const list = withUnmatchedTiles(real, [...swept, ...tiles])
+      return community.size ? list.map((p) => { const sp = community.get(placeKey(p)); return sp ? applyCommunitySpecs(p, sp) : p }) : list
+    }
+    const render = () => {
       if (ac.signal.aborted) return
-      if (result.unavailable) {
-        // Live data servers are busy: show REAL places from the map tiles rather than nothing (or fakes).
-        const map = mapRef.current
-        if (map && map.getZoom() >= TILE_POI_MIN_ZOOM) {
-          const fromTiles = poisFromTiles(map, cat, c, 5000)
-          setPois(fromTiles); setDataSource('tiles')
-        } else if (!FIREBASE_ENABLED) {
-          setPois(placeholderPois(c, cat)); setDataSource('samples')
-        } else {
-          setPois([]); setDataSource(map ? 'zoom' : 'unavailable')
-        }
-        setLoadingPois(false)
-        return
+      const list = view()
+      setPois(list)
+      if (list.length) { setDataSource(real.length ? 'live' : 'tiles'); setLoadingPois(false) }
+    }
+    if (tiles.length) render()
+
+    const fromNominatim = nominatimNearby(c, cat, 5000, (batch) => { real = mergePois(real, batch, false); render() }, ac.signal)
+      .then(() => true, (e) => { if (e?.name === 'AbortError') throw e; return false })
+    const fromOverpass = nearbyByCategory(c, cat, 5000, ac.signal, 8000)
+      .then((r) => { if (r.unavailable) return false; real = mergePois(real, r.pois, true); render(); return true })
+      .catch((e) => { if (e?.name === 'AbortError') throw e; return false })
+    // Every named place nearby, then its real OSM accessibility tags (50 places per lookup).
+    const fromSweep = placesAround(c, cat, 5000, ac.signal, 300)
+      .then(async (list) => {
+        swept = list; render()
+        await fromNominatim // don't re-look-up places the category search already returned
+        const known = new Set(real.map((p) => p.osmId))
+        const ids = list.map((p) => p.osmId).filter((id) => id && !known.has(id))
+        if (ids.length) await nominatimLookupMany(ids, cat, ac.signal, (batch) => { real = mergePois(real, batch, false); render() })
+        return true
+      })
+      .catch((e) => { if (e?.name === 'AbortError') throw e; return false })
+
+    try {
+      const [nomOk, sweepOk] = await Promise.all([fromNominatim, fromSweep])
+      if (ac.signal.aborted) return
+      // Nothing within 5 km: widen once (Nominatim only — it's fast).
+      if (!real.length && !swept.length && !tiles.length && (nomOk || sweepOk)) {
+        await nominatimNearby(c, cat, 15000, (batch) => { real = mergePois(real, batch, false); render() }, ac.signal).catch((e) => { if (e?.name === 'AbortError') throw e })
       }
-      setPois(result.pois)
-      setDataSource('live')
+      // Ratings reported by AccessMap users.
+      const ids = view().map(placeKey)
+      if (ids.length) {
+        community = await getSpecsFor(ids).catch(() => new Map<string, AccessSpecs[]>())
+        render()
+      }
+      const opOk = await fromOverpass
+      if (ac.signal.aborted) return
+      setRefining(false)
       setLoadingPois(false)
-      // Patch in Wikipedia images for POIs without an OSM image
-      if (result.needsImage.length > 0 && !ac.signal.aborted) {
-        batchWikiImages(result.needsImage, 4).then((wikiMap) => {
+      const final = view()
+      if (final.length) {
+        setPois(final)
+        setDataSource(real.length ? 'live' : 'tiles')
+        if (real.length) poiCache.current.set(key, final)
+      } else {
+        setPois([])
+        setDataSource(nomOk || opOk || sweepOk ? 'live' : map && map.getZoom() < TILE_POI_MIN_ZOOM ? 'zoom' : 'unavailable')
+      }
+      // Patch in Wikipedia images for places without an OSM image
+      const needsImage = real.filter((p) => !p.imageUrl).slice(0, 25).map((p) => p.name)
+      if (needsImage.length) {
+        batchWikiImages(needsImage, 4).then((wikiMap) => {
           if (ac.signal.aborted) return
           setPois(prev => prev.map(poi =>
             !poi.imageUrl && wikiMap.has(poi.name)
@@ -301,7 +391,7 @@ export default function MapPage() {
       }
     } catch (e: any) {
       if (e?.name !== 'AbortError') showToast('Search failed — check your connection and try again.', 'error')
-      setLoadingPois(false)
+      if (!ac.signal.aborted) { setLoadingPois(false); setRefining(false) }
     }
   }
 
@@ -337,7 +427,7 @@ export default function MapPage() {
     && haversineKm(lastSearch.center, viewCenter) > 1.2)
 
   function runCategory(cat: CategoryKey) {
-    if (activeCat === cat) { setActiveCat(null); setPois([]); setPanelOpen(false); setLastSearch(null); return }
+    if (activeCat === cat) { poiAbort.current?.abort(); setRefining(false); setActiveCat(null); setPois([]); setPanelOpen(false); setLastSearch(null); return }
     const c = currentCenter()
     if (c) searchCategory(cat, c)
     else { setActiveCat(cat); setPanelOpen(true); setLoadingPois(true); startLocation(true) }
@@ -398,8 +488,9 @@ export default function MapPage() {
     const dist = (p: Poi) => (origin ? haversineKm(origin, [p.lat, p.lng]) : 0)
     const active = DIS_FILTERS.filter((f) => dis.has(f.key))
     const filtered = active.length ? pois.filter((p) => active.every((f) => f.poi(p))) : pois
-    // With a needs profile set, rank by personal match; otherwise by access score.
-    const rank = (p: Poi) => (profileActive ? scorePoi(p, needsProfile).score / 10 : p.accessScore ?? -1)
+    // Real ratings (mapped or reported) first, then estimates, then unrated places.
+    // Within a tier: personal match when a needs profile is set, else access score.
+    const rank = (p: Poi) => ratingTier(p) * 100 + (profileActive ? scorePoi(p, needsProfile).score / 10 : p.accessScore ?? 0)
     return [...filtered].sort((a, b) => {
       const sa = rank(a), sb = rank(b)
       if (Math.abs(sb - sa) > 0.05) return sb - sa
@@ -567,7 +658,7 @@ export default function MapPage() {
         )}
 
         {/* Needs filters */}
-        <div className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Filter by access need">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6" role="group" aria-label="Filter by access need">
           {profileActive && (
             <button
               onClick={() => setForMeOnly((s) => !s)}
@@ -598,7 +689,7 @@ export default function MapPage() {
 
         {/* Category chips */}
         <div
-          className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6"
           role="group"
           aria-label="Find nearby"
         >
@@ -634,12 +725,15 @@ export default function MapPage() {
               )}
               <div className="min-w-0 flex-1">
                 <h2 className="text-base font-bold text-ink">{activeCatMeta?.label}</h2>
-                <p className="text-xs text-muted">
+                <p className="flex items-center gap-1.5 text-xs text-muted">
                   {loadingPois ? 'Searching nearby…' : `${sortedPois.length} place${sortedPois.length !== 1 ? 's' : ''} · ${dataSource === 'tiles' ? 'nearest first' : profileActive ? 'best match for you first' : 'best access first'}`}
+                  {refining && !loadingPois && (
+                    <span className="inline-flex items-center gap-1 text-primary"><Loader2 size={11} className="animate-spin" aria-hidden="true" /> finding more</span>
+                  )}
                 </p>
               </div>
               <button
-                onClick={() => { setPanelOpen(false); setActiveCat(null); setPois([]) }}
+                onClick={() => { poiAbort.current?.abort(); setRefining(false); setPanelOpen(false); setActiveCat(null); setPois([]) }}
                 aria-label="Close results"
                 className="flex h-10 w-10 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-ink"
               >
@@ -647,26 +741,29 @@ export default function MapPage() {
               </button>
             </div>
 
-            {!loadingPois && dataSource !== 'live' && (
-              <p className={`flex items-start gap-2 border-b border-border/70 px-4 py-2 text-xs ${dataSource === 'tiles' ? 'bg-[#e8f0fe] text-[#0b3d91]' : 'bg-[#fff7ed] text-[#7c2d12]'}`} role="note">
+            {!loadingPois && !refining && dataSource !== 'live' && (
+              <p className="flex items-start gap-2 border-b border-border/70 bg-surface/70 px-4 py-2 text-xs text-muted" role="note">
                 <Info size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
                 <span>
-                  {dataSource === 'tiles' && <>The live accessibility database is busy, so these are <strong>real places from the map</strong> without access ratings yet. Open one to load its details, or <button className="font-bold underline" onClick={() => { const c = currentCenter(); if (c && activeCat) searchCategory(activeCat, c) }}>try again</button>.</>}
-                  {dataSource === 'samples' && <>Offline demo: these are <strong>sample places</strong>, not real results.</>}
-                  {dataSource === 'zoom' && <>The live place database is busy. <strong>Zoom in closer</strong> and press search again to see real places from the map.</>}
-                  {dataSource === 'unavailable' && <>Place data couldn’t load right now. Check your connection and try again.</>}
+                  {dataSource === 'tiles' && <>Access ratings couldn’t load, so these places are unrated for now. Tap one to load its details, or <button className="font-bold text-primary underline" onClick={() => { const c = currentCenter(); if (c && activeCat) searchCategory(activeCat, c) }}>try again</button>.</>}
+                  {dataSource === 'zoom' && <>Place data is slow right now. <strong>Zoom in closer</strong> and search again.</>}
+                  {dataSource === 'unavailable' && <>Place data couldn’t load. Check your connection and <button className="font-bold text-primary underline" onClick={() => { const c = currentCenter(); if (c && activeCat) searchCategory(activeCat, c) }}>try again</button>.</>}
                 </span>
               </p>
             )}
 
-            <ul className="min-h-0 flex-1 overflow-y-auto" aria-busy={loadingPois}>
-              {loadingPois && (
-                <li className="flex flex-col items-center justify-center gap-2 py-12 text-muted">
-                  <Loader2 size={24} className="animate-spin text-primary" aria-hidden="true" />
-                  <p className="text-sm">Finding accessible places…</p>
+            <ul className="min-h-0 flex-1 overflow-y-auto" aria-busy={loadingPois || refining}>
+              {loadingPois && [0, 1, 2, 3, 4].map((k) => (
+                <li key={k} className="flex items-center gap-3 px-4 py-3" aria-hidden="true">
+                  <span className="h-12 w-12 shrink-0 animate-pulse rounded-xl bg-surface" />
+                  <span className="flex-1 space-y-2">
+                    <span className="block h-3.5 w-3/5 animate-pulse rounded bg-surface" />
+                    <span className="block h-3 w-4/5 animate-pulse rounded bg-surface" />
+                  </span>
                 </li>
-              )}
-              {!loadingPois && sortedPois.length === 0 && (
+              ))}
+              {loadingPois && <li className="visually-hidden">Finding accessible places…</li>}
+              {!loadingPois && sortedPois.length === 0 && dataSource === 'live' && (
                 <li className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
                   <p className="text-sm font-semibold text-ink">Nothing found nearby</p>
                   <p className="text-xs text-muted">
@@ -684,69 +781,69 @@ export default function MapPage() {
               {!loadingPois && sortedPois.map((p, i) => {
                 const here = distanceOrigin()
                 const dist = here ? haversineKm(here, [p.lat, p.lng]) : null
-                const fromTiles = p.id.startsWith('tile-')
+                const fromTiles = p.id.startsWith('tile-') && !p.communityReports
                 const desc = p.tags && !fromTiles ? describePlace(p.tags, p.category) : null
                 const match = profileActive ? scorePoi(p, needsProfile) : null
-                const bd = p.breakdown
+                const tier = ratingTier(p)
+                const estimated = tier === 1
+                const source = p.communityReports ? `${p.communityReports} community report${p.communityReports > 1 ? 's' : ''}` : tier === 2 ? 'OpenStreetMap' : tier === 1 ? 'Estimated' : null
                 return (
                   <li
                     key={p.id}
-                    className="border-b border-border/60 last:border-0"
-                    style={{ animation: 'pageIn 260ms ease-out both', animationDelay: `${Math.min(i, 10) * 30}ms` }}
+                    className="flex items-center border-b border-border/60 last:border-0"
+                    style={{ animation: 'pageIn 220ms ease-out both', animationDelay: `${Math.min(i, 8) * 25}ms` }}
                   >
-                    <div className="flex gap-3 px-4 py-3.5">
+                    <button
+                      onClick={() => onPoiSelect(p)}
+                      className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left transition-colors hover:bg-surface/60 focus-visible:bg-surface/60"
+                    >
                       {p.imageUrl ? (
                         <img
                           src={p.imageUrl}
                           alt=""
-                          className="h-16 w-16 shrink-0 rounded-2xl bg-surface object-cover"
+                          loading="lazy"
+                          className="h-12 w-12 shrink-0 rounded-xl bg-surface object-cover"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                         />
                       ) : (
-                        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-white" style={{ background: categoryColor(p.category) }} aria-hidden="true">
-                          {activeCatMeta && <activeCatMeta.icon size={24} />}
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ background: `${categoryColor(p.category)}1f`, color: categoryColor(p.category) }} aria-hidden="true">
+                          {activeCatMeta && <activeCatMeta.icon size={20} />}
                         </span>
                       )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start gap-2">
-                          <h3 className="min-w-0 flex-1 text-[15px] font-bold leading-snug text-ink">
-                            <button onClick={() => onPoiSelect(p)} className="text-left hover:underline">{p.name}</button>
-                          </h3>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">{p.name}</span>
                           {p.accessScore != null ? (
-                            <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-bold text-white" style={{ background: scoreColor(p.accessScore) }}>
-                              {p.accessScore.toFixed(1)}<span className="visually-hidden"> out of 10, {p.accessLabel}</span>
+                            <span
+                              className="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-bold text-white"
+                              style={{ background: scoreColor(p.accessScore), opacity: estimated ? 0.75 : 1 }}
+                              title={estimated ? 'Estimated from the type of place — little mapped data' : p.accessLabel}
+                            >
+                              {estimated && '~'}{p.accessScore.toFixed(1)}<span className="visually-hidden"> out of 10, {p.accessLabel}{estimated ? ', estimated' : ''}</span>
                             </span>
                           ) : (
-                            <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-muted">Unrated</span>
+                            <span className="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-muted">Unrated</span>
                           )}
-                        </div>
-                        <p className="mt-0.5 truncate text-xs text-muted">
-                          {p.address || activeCatMeta?.label}
-                          {dist != null && <span className="font-semibold text-primary"> · {fmtKm(dist)}</span>}
-                          {match && <span className="font-semibold" style={{ color: GRADE_COLOR[match.grade] }}> · {match.score}% match</span>}
-                        </p>
-                        {desc && <p className="mt-1.5 text-[13px] leading-snug text-ink">{desc.summary}</p>}
-                        {fromTiles ? (
-                          <p className="mt-1 text-[11px] text-muted">Access not yet assessed — open Details to load it.</p>
-                        ) : bd.confidence === 'low' || bd.confidence === 'none' ? (
-                          <p className="mt-1 text-[11px] text-muted">Score estimated from the type of place — little mapped data.</p>
-                        ) : null}
-                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                          <Link
-                            to={routeHref(p.lat, p.lng, p.name)}
-                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-white"
-                          >
-                            <Navigation size={13} aria-hidden="true" /> Route<span className="visually-hidden"> to {p.name}</span>
-                          </Link>
-                          <button
-                            onClick={() => onPoiSelect(p)}
-                            className="inline-flex min-h-[36px] items-center gap-1 rounded-full border border-border bg-card px-3.5 text-xs font-bold text-ink"
-                          >
-                            Details<span className="visually-hidden"> for {p.name}</span> <ChevronRight size={13} aria-hidden="true" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                        </span>
+                        <span className="mt-0.5 block truncate text-[13px] text-ink/80">
+                          {desc ? desc.summary : fromTiles ? 'Tap to load access details' : p.accessLabel}
+                        </span>
+                        <span className="mt-0.5 block truncate text-xs text-muted">
+                          {dist != null && <span className="font-semibold text-ink/70">{fmtKm(dist)}</span>}
+                          {source && <>{dist != null && ' · '}<span className={tier === 2 ? 'font-semibold text-[#1e8e3e]' : ''}>{source}</span></>}
+                          {(dist != null || source) && (p.address || match) && ' · '}
+                          {p.address}
+                          {match && <span className="font-semibold" style={{ color: GRADE_COLOR[match.grade] }}>{p.address ? ' · ' : ''}{match.score}% match</span>}
+                        </span>
+                      </span>
+                    </button>
+                    <Link
+                      to={routeHref(p.lat, p.lng, p.name)}
+                      aria-label={`Accessible route to ${p.name}`}
+                      className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition-colors hover:bg-primary hover:text-white"
+                    >
+                      <Navigation size={16} aria-hidden="true" />
+                    </Link>
                   </li>
                 )
               })}

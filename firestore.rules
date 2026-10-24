@@ -83,6 +83,12 @@ service cloud.firestore {
       }
     }
 
+    // Community specs are public; this lets search results read them for many
+    // places in one collection-group query (writes still go through the rule above).
+    match /{path=**}/specs/{specId} {
+      allow read: if true;
+    }
+
     // ── Alerts ────────────────────────────────────────────────────────────────
     match /alerts/{alertId} {
       allow read: if true;

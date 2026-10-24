@@ -84,13 +84,17 @@ export default function PlaceDetail() {
       setPlace(p)
       setAdaFlag(checkAdaCompliance(p.name, p.city))
       setOsmOnlyMode(false)
-      // Fetch reviews, alerts, specs in parallel
-      const [revs, alts, sps] = await Promise.all([getReviews(id), getAlerts(id), getSpecs(id)])
-      setReviews(revs); setAlerts(alts); setSpecs(sps)
       setOsmLoading(true)
-      fetchOsmDetails(p.lat, p.lng, ac.signal)
-        .then(d => { if (!ac.signal.aborted) setOsmData(d) })
+      // Quick result (Nominatim) renders right away; the full one replaces it when ready.
+      const onQuick = (d: OsmData) => { if (!ac.signal.aborted) { setOsmData(d); setOsmLoading(false) } }
+      fetchOsmDetails(p.lat, p.lng, ac.signal, { name: p.name, onQuick })
+        .then(d => { if (!ac.signal.aborted) setOsmData(prev => d ?? prev) })
+        .catch(() => { /* aborted */ })
         .finally(() => { if (!ac.signal.aborted) setOsmLoading(false) })
+      // Fetch reviews, alerts, specs in parallel (alongside the OSM lookup)
+      const [revs, alts, sps] = await Promise.all([getReviews(id), getAlerts(id), getSpecs(id)])
+      if (ac.signal.aborted) return
+      setReviews(revs); setAlerts(alts); setSpecs(sps)
     } else {
       // OSM POI — lat/lng/name passed as query params
       const lat = parseFloat(searchParams.get('lat') ?? '')
@@ -104,15 +108,22 @@ export default function PlaceDetail() {
           scores: { mobility: 0, sensory: 0, hearing: 0, vision: 0 },
           reviewCount: 0, lastUpdated: 0,
         })
-        setSpecs(await getSpecs(id))
         setOsmLoading(true)
-        fetchOsmDetails(lat, lng, ac.signal)
+        getSpecs(id).then(s => { if (!ac.signal.aborted) setSpecs(s) })
+        const osm = searchParams.get('osm') ?? (/^(node|way|relation)-\d+$/.test(id) ? id.replace('-', '/') : undefined)
+        const onQuick = (d: OsmData) => {
+          if (ac.signal.aborted) return
+          setOsmData(d); setOsmLoading(false)
+          if (d.name) setPlace(prev => prev ? { ...prev, name: d.name!, address: d.extras.find(e => e.label === 'Address')?.value ?? prev.address } : prev)
+        }
+        fetchOsmDetails(lat, lng, ac.signal, { osmId: osm, name, onQuick })
           .then(d => {
-            if (ac.signal.aborted) return
+            if (ac.signal.aborted || !d) return
             setOsmData(d)
             // Patch name from OSM if available
-            if (d?.name) setPlace(prev => prev ? { ...prev, name: d.name!, address: d.extras.find(e => e.label === 'Address (OSM)')?.value ?? '' } : prev)
+            if (d?.name) setPlace(prev => prev ? { ...prev, name: d.name!, address: d.extras.find(e => e.label === 'Address')?.value ?? prev.address } : prev)
           })
+          .catch(() => { /* aborted */ })
           .finally(() => { if (!ac.signal.aborted) setOsmLoading(false) })
       }
     }

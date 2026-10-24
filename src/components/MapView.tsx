@@ -75,7 +75,9 @@ function MapView({
 }: Props) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
-  const markers = useRef<Marker[]>([])
+  const markers = useRef(new Map<string, { marker: Marker; sig: string }>())
+  // Latest data per pin, so a reused pin's click always opens the current version of its place.
+  const latest = useRef(new Map<string, Place | Poi>())
   const stationMarkers = useRef<Marker[]>([])
   const userMarker = useRef<Marker | null>(null)
   const cb = useRef({ onSelect, onPoiSelect, onCenterChange, onReady, onUserGesture })
@@ -120,37 +122,45 @@ function MapView({
     if (mapRef.current) setMapMode(mapRef.current, flat)
   }, [flat])
 
-  // Place + POI pins
+  // Place + POI pins — keyed, so streaming in more results only touches the pins that changed.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    markers.current.forEach((m) => m.remove())
-    markers.current = []
+    const next = new Map<string, { marker: Marker; sig: string }>()
+    latest.current = new Map<string, Place | Poi>([...places.map((p): [string, Place | Poi] => [`place:${p.id}`, p]), ...pois.map((p): [string, Place | Poi] => [`poi:${p.id}`, p])])
+    const upsert = (key: string, sig: string, lngLat: [number, number], make: () => HTMLElement) => {
+      const prev = markers.current.get(key)
+      if (prev && prev.sig === sig) { prev.marker.setLngLat(lngLat); next.set(key, prev); markers.current.delete(key); return }
+      if (prev) { prev.marker.remove(); markers.current.delete(key) }
+      next.set(key, { marker: new maplibregl.Marker({ element: make(), anchor: 'bottom' }).setLngLat(lngLat).addTo(map), sig })
+    }
     places.forEach((p) => {
       const avg = (p.scores.mobility + p.scores.sensory + p.scores.hearing + p.scores.vision) / 4
       const alert = alertPlaceIds.has(p.id)
-      const el = pinEl({
+      const sel = p.id === selectedId
+      upsert(`place:${p.id}`, `${avg}|${alert}|${sel}|${p.sponsored}|${colorSafe}|${p.name}`, [p.lng, p.lat], () => pinEl({
         color: alert ? '#b45309' : scoreColor(avg),
-        ring: p.id === selectedId ? '#111827' : p.sponsored ? '#7c3aed' : '#fff',
-        big: p.id === selectedId,
+        ring: sel ? '#111827' : p.sponsored ? '#7c3aed' : '#fff',
+        big: sel,
         text: alert ? '!' : pinScore(avg),
         label: `${p.name}. Accessibility ${avg.toFixed(1)} out of 10, ${scoreWord(avg)}${alert ? '. Active accessibility alert' : ''}${p.sponsored ? '. Featured' : ''}`,
-        onClick: () => cb.current.onSelect?.(p),
-      })
-      markers.current.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(map))
+        onClick: () => cb.current.onSelect?.((latest.current.get(`place:${p.id}`) as Place) ?? p),
+      }))
     })
     pois.forEach((p) => {
       const rated = p.accessScore != null
-      const el = pinEl({
+      const sel = p.id === selectedId
+      upsert(`poi:${p.id}`, `${p.accessScore}|${p.accessLabel}|${sel}|${colorSafe}|${p.name}`, [p.lng, p.lat], () => pinEl({
         color: rated ? scoreColor(p.accessScore!) : '#6b7280',
-        ring: p.id === selectedId ? '#111827' : '#fff',
-        big: p.id === selectedId,
+        ring: sel ? '#111827' : '#fff',
+        big: sel,
         text: rated ? pinScore(p.accessScore!) : '?',
         label: `${p.name}. ${rated ? `Accessibility ${p.accessScore!.toFixed(1)} out of 10, ${p.accessLabel}` : 'Accessibility not rated'}`,
-        onClick: () => cb.current.onPoiSelect?.(p),
-      })
-      markers.current.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(map))
+        onClick: () => cb.current.onPoiSelect?.((latest.current.get(`poi:${p.id}`) as Poi) ?? p),
+      }))
     })
+    markers.current.forEach(({ marker }) => marker.remove()) // pins no longer shown
+    markers.current = next
   }, [places, pois, alertPlaceIds, selectedId, colorSafe])
 
   // User location — pulsing dot plus a halo showing how accurate the fix is

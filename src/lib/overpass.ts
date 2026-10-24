@@ -74,6 +74,8 @@ export interface Poi {
   wheelchairDescription?: string
   /** Raw OSM tags — used to build the plain-language description. */
   tags?: Record<string, string>
+  /** Number of AccessMap community reports folded into this place's rating. */
+  communityReports?: number
 }
 
 const SMOOTH = ['asphalt', 'paved', 'concrete', 'paving_stones', 'wood', 'metal', 'rubber', 'tartan', 'tiles']
@@ -374,82 +376,6 @@ export const CATEGORIES: { key: CategoryKey; label: string; icon: LucideIcon; se
 export const categoryColor = (k: CategoryKey): string =>
   CATEGORIES.find((c) => c.key === k)?.color ?? '#ea4335'
 
-/* ------------------------------------------------------------------ *
- * Placeholder POIs — a fallback for when the live Overpass query fails
- * (no network, all three endpoints down) or genuinely finds nothing nearby.
- * Keeps every category chip showing *something* instead of a dead end.
- * Positioned a short offset from wherever the user searched, and run
- * through the same `deriveAccess` scoring as real OSM results so they look
- * and behave identically (score ring, badges, filters — all the same).
- * ------------------------------------------------------------------ */
-interface PlaceholderSeed {
-  name: string
-  address: string
-  dLat: number // degrees offset from the search center
-  dLng: number
-  tags: Record<string, string>
-}
-
-const PLACEHOLDER_SEEDS: Record<CategoryKey, PlaceholderSeed[]> = {
-  restaurant: [
-    { name: "Mi Madre's Cedar Park", address: 'E Whitestone Blvd', dLat: 0.006, dLng: 0.004, tags: { wheelchair: 'yes', 'toilets:wheelchair': 'yes', automatic_door: 'yes' } },
-    { name: 'The Brass Tap',         address: '183A Toll Rd',      dLat: -0.005, dLng: 0.009, tags: { wheelchair: 'limited', step_count: '2', step_height: '15 cm' } },
-  ],
-  cafe: [
-    { name: 'Mazette Coffee',     address: 'E Whitestone Blvd', dLat: 0.003,  dLng: -0.007, tags: { wheelchair: 'yes', 'toilets:wheelchair': 'yes' } },
-    { name: 'Corner Bakery Cafe', address: 'Lakeline Blvd',     dLat: -0.008, dLng: -0.003, tags: { wheelchair: 'limited', surface: 'gravel' } },
-  ],
-  hotel: [
-    { name: 'La Quinta Inn Cedar Park',       address: 'N Hwy 183',   dLat: 0.011,  dLng: 0.006, tags: { wheelchair: 'yes', lift: 'yes', 'toilets:wheelchair': 'yes', hearing_loop: 'yes' } },
-    { name: 'Holiday Inn Express Cedar Park', address: 'Ranch Trail', dLat: -0.009, dLng: 0.012, tags: { wheelchair: 'yes', lift: 'yes' } },
-  ],
-  hospital: [
-    { name: 'Cedar Park Urgent Care',   address: 'Medical Pkwy', dLat: 0.004,  dLng: 0.010,  tags: { wheelchair: 'yes', lift: 'yes', 'toilets:wheelchair': 'yes', 'parking:disabled': 'yes', quiet_room: 'yes' } },
-    { name: 'Lakeline Family Medicine', address: 'Lakeline Blvd', dLat: -0.006, dLng: -0.008, tags: { wheelchair: 'yes', 'toilets:wheelchair': 'yes' } },
-  ],
-  pharmacy: [
-    { name: 'CVS Pharmacy — Whitestone', address: 'E Whitestone Blvd', dLat: 0.007,  dLng: -0.002, tags: { wheelchair: 'yes' } },
-    { name: 'Walgreens — 183A',          address: 'US-183',            dLat: -0.004, dLng: 0.007,  tags: { wheelchair: 'limited' } },
-  ],
-  shop: [
-    { name: 'Target Cedar Park', address: 'E Whitestone Blvd', dLat: 0.009,  dLng: -0.005, tags: { wheelchair: 'yes', 'toilets:wheelchair': 'yes', automatic_door: 'yes', tactile_paving: 'yes' } },
-    { name: 'Best Buy Lakeline', address: 'Lakeline Mall Dr',  dLat: -0.010, dLng: -0.006, tags: { wheelchair: 'yes' } },
-  ],
-  school: [
-    { name: 'Cedar Park High School', address: 'Cypress Creek Rd', dLat: 0.013,  dLng: -0.004, tags: { wheelchair: 'yes', lift: 'yes', hearing_loop: 'yes' } },
-    { name: 'Westside Elementary',    address: 'Brushy Creek Rd',  dLat: -0.007, dLng: 0.005,  tags: { wheelchair: 'limited', quiet_room: 'yes' } },
-  ],
-  attraction: [
-    { name: 'Typhoon Texas Waterpark',       address: 'Lakeline Blvd',       dLat: 0.015,  dLng: 0.009,  tags: { wheelchair: 'limited', surface: 'ground' } },
-    { name: 'Play For All Abilities Park',   address: 'Buttercup Creek Blvd', dLat: -0.006, dLng: -0.011, tags: { wheelchair: 'yes', tactile_paving: 'yes', 'toilets:wheelchair': 'yes', quiet_room: 'yes' } },
-  ],
-  park: [
-    { name: 'Elizabeth Milburn Park',  address: 'Brushy Creek Rd', dLat: 0.005,  dLng: 0.013, tags: { wheelchair: 'yes', surface: 'paved' } },
-    { name: 'Veterans Memorial Park',  address: 'Cedar Park Dr',   dLat: -0.012, dLng: 0.004, tags: { wheelchair: 'limited', surface: 'gravel' } },
-  ],
-  bank: [
-    { name: 'Chase Bank — Whitestone', address: 'E Whitestone Blvd', dLat: 0.002,  dLng: -0.009, tags: { wheelchair: 'yes', tactile_paving: 'yes' } },
-    { name: 'Wells Fargo — 183A',      address: 'US-183',            dLat: -0.003, dLng: -0.012, tags: { wheelchair: 'yes' } },
-  ],
-}
-
-/** Demo-only sample places (offline mode). Never shown as real results on the live site. */
-export function placeholderPois(center: [number, number], category: CategoryKey): Poi[] {
-  const seeds = PLACEHOLDER_SEEDS[category] ?? []
-  const [lat, lng] = center
-  return seeds.map((seed, i) => ({
-    id: `placeholder-${category}-${i}`,
-    osmId: `placeholder/${category}/${i}`,
-    name: seed.name,
-    lat: lat + seed.dLat,
-    lng: lng + seed.dLng,
-    category,
-    address: seed.address,
-    ...deriveAccess(seed.tags, category),
-    tags: seed.tags,
-  }))
-}
-
 function wikimediaThumb(id: string): string | undefined {
   const file = id.replace(/^(File:|Category:)/, '').trim()
   if (!file) return undefined
@@ -526,27 +452,21 @@ export async function nearbyByCategory(
   category: CategoryKey,
   radius = 2000,
   signal?: AbortSignal,
+  budgetMs = 15000,
 ): Promise<{ pois: Poi[]; needsImage: string[]; unavailable?: boolean }> {
   const cat = CATEGORIES.find((c) => c.key === category)
   if (!cat) return { pois: [], needsImage: [] }
   await spaced('overpass', 800)
   const [lat, lng] = center
-  const q = `
-    [out:json][timeout:30];
-    (
-      node${cat.selector}["name"](around:${radius},${lat},${lng});
-      way${cat.selector}["name"](around:${radius},${lat},${lng});
-      relation${cat.selector}["name"](around:${radius},${lat},${lng});
-    );
-    out center tags 60;`
+  const q = `[out:json][timeout:${Math.ceil(budgetMs / 1000)}];nwr${cat.selector}["name"](around:${radius},${lat},${lng});out center tags 80;`
   let data: any
   try {
-    data = await overpassQuery(q, signal)
+    data = await overpassQuery(q, signal, budgetMs)
   } catch (e) {
     if ((e as any)?.name === 'AbortError') throw e
     // Live query unreachable (offline, blocked, all endpoints busy). The
-    // caller decides the fallback — real places from the map tiles, or the
-    // demo placeholders when running offline — instead of silently faking it.
+    // caller falls back to other real sources (Nominatim, map tiles) instead
+    // of faking it.
     return { pois: [], needsImage: [], unavailable: true }
   }
   const seen = new Set<string>()
@@ -556,8 +476,11 @@ export async function nearbyByCategory(
   for (const el of data.elements as any[]) {
     const plat = el.lat ?? el.center?.lat
     const plng = el.lon ?? el.center?.lon
-    if (!plat || !plng || !el.tags?.name || seen.has(el.tags.name)) continue
-    seen.add(el.tags.name)
+    // Same place mapped as both a node and a building outline → keep one. Chains
+    // (several "Starbucks") are different places, so key by name AND position.
+    const dupKey = `${el.tags?.name}|${(+plat).toFixed(3)}|${(+plng).toFixed(3)}`
+    if (!plat || !plng || !el.tags?.name || seen.has(dupKey)) continue
+    seen.add(dupKey)
     const tags: Record<string, string> = el.tags ?? {}
 
     let imageUrl: string | undefined

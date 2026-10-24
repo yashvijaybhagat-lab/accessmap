@@ -300,6 +300,33 @@ export async function getSpecs(placeId: string): Promise<AccessSpecs[]> {
   return snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<AccessSpecs, 'id'>), contributedAt: toMs(d.data().contributedAt) }))
 }
 
+/**
+ * Community specs for many places at once (newest first per place), for
+ * putting user-reported access data on search results. Needs the `specs`
+ * collection-group rule + index; resolves empty if they aren't deployed.
+ */
+export async function getSpecsFor(placeIds: string[]): Promise<Map<string, AccessSpecs[]>> {
+  const out = new Map<string, AccessSpecs[]>()
+  const ids = [...new Set(placeIds)]
+  const add = (s: AccessSpecs) => out.set(s.placeId, [...(out.get(s.placeId) ?? []), s])
+  const db = FIREBASE_ENABLED ? await getDb() : null
+  if (!db) {
+    const want = new Set(ids)
+    localSpecs.filter((s) => want.has(s.placeId)).forEach(add)
+  } else {
+    const { collectionGroup, query, where, getDocs } = await fs()
+    const chunks: string[][] = []
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30)) // Firestore `in` limit
+    const snaps = await Promise.allSettled(chunks.map((c) => getDocs(query(collectionGroup(db, 'specs'), where('placeId', 'in', c)))))
+    for (const r of snaps) {
+      if (r.status !== 'fulfilled') continue
+      r.value.docs.forEach((d) => add({ id: d.id, ...(d.data() as Omit<AccessSpecs, 'id'>), contributedAt: toMs(d.data().contributedAt) }))
+    }
+  }
+  out.forEach((list) => list.sort((a, b) => b.contributedAt - a.contributedAt))
+  return out
+}
+
 export async function addSpecs(input: Omit<AccessSpecs, 'id' | 'contributedAt'>): Promise<AccessSpecs> {
   checkRate('report', { minGapMs: 5000, maxPerHour: 20, label: 'spec contribution' })
   const db = FIREBASE_ENABLED ? await getDb() : null

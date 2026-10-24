@@ -31,9 +31,9 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
   const detailHref =
     selected.kind === 'place'
       ? `/place/${p.id}`
-      : `/place/${p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}`
+      : `/place/${(p as Poi).osmId ? (p as Poi).osmId.replace('/', '-') : p.id}?lat=${p.lat}&lng=${p.lng}&name=${encodeURIComponent(p.name)}${(p as Poi).osmId ? `&osm=${(p as Poi).osmId}` : ''}`
 
-  const fromTiles = selected.kind === 'poi' && selected.data.id.startsWith('tile-')
+  const fromTiles = selected.kind === 'poi' && selected.data.id.startsWith('tile-') && !selected.data.communityReports
   const desc = useMemo(
     () => (selected.kind === 'poi' && selected.data.tags && !fromTiles ? describePlace(selected.data.tags, selected.data.category) : null),
     [selected, fromTiles],
@@ -60,12 +60,6 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
         )}
       </div>
 
-      {selected.kind === 'poi' && selected.data.id.startsWith('placeholder') && (
-        <p className="mt-3 rounded-xl bg-[#fff7ed] px-3 py-2 text-xs text-[#7c2d12]" role="note">
-          <strong>Sample place</strong> — live map data couldn't load, so this isn't a real result.
-        </p>
-      )}
-
       {selected.kind === 'place' && (
         <div className="mt-3 grid grid-cols-4 gap-2">
           {DIMS.map(({ key, label }) => (
@@ -89,9 +83,15 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
 
       {fromTiles && (
         <p className="mt-3 rounded-xl bg-[#e8f0fe] px-3 py-2 text-[13px] text-[#0b3d91]" role="note">
-          Accessibility details for this place haven't loaded yet (the live database is busy). Open <strong>Full details</strong> to fetch them.
+          No accessibility details are mapped for this place yet. Open <strong>Full details</strong> to check again or add what you know.
         </p>
       )}
+
+      {selected.kind === 'poi' && selected.data.communityReports ? (
+        <p className="mt-3 text-xs font-semibold text-[#1e8e3e]">
+          Includes {selected.data.communityReports} AccessMap community report{selected.data.communityReports > 1 ? 's' : ''}
+        </p>
+      ) : null}
 
       {desc && (
         <div className="mt-4">

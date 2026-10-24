@@ -1,5 +1,6 @@
 import type { AccessSpecs } from '../types'
-import { deriveAccess, type ScoreBreakdown } from './overpass'
+import { deriveAccess, overpassQuery as hedgedOverpass, type ScoreBreakdown } from './overpass'
+import { nominatimLookup, nominatimByName } from './nominatimPois'
 import { fetchWikiImage } from './wikipedia'
 
 export interface OsmData {
@@ -18,27 +19,9 @@ export interface OsmData {
   raw: Record<string, string>
 }
 
-const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://lz4.overpass-api.de/api/interpreter',
-]
-
-async function overpassQuery(q: string, signal?: AbortSignal): Promise<any> {
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        body: 'data=' + encodeURIComponent(q),
-        signal,
-      })
-      if (res.ok) return await res.json()
-    } catch (e) {
-      if ((e as any)?.name === 'AbortError') throw e
-    }
-  }
-  throw new Error('All Overpass endpoints failed')
-}
+// Shared hedged Overpass client with a hard time budget, so a busy server
+// can't leave the details page spinning.
+const overpassQuery = (q: string, signal?: AbortSignal) => hedgedOverpass(q, signal, 9000)
 
 // Tags that indicate accessibility-relevant data
 const A11Y_TAGS = [
@@ -139,32 +122,9 @@ function mergeTags(main: Record<string, string>, subElements: Record<string, str
   return merged
 }
 
-export async function fetchOsmDetails(lat: number, lng: number, signal?: AbortSignal): Promise<OsmData | null> {
-  // q1: Named elements within 200m (catches large buildings as relations)
-  const q1 = `
-    [out:json][timeout:25];
-    (
-      node(around:200,${lat},${lng})["name"];
-      way(around:200,${lat},${lng})["name"];
-      relation(around:200,${lat},${lng})["name"];
-    );
-    out center tags 20;`
-
-  // q2: Any wheelchair-tagged element within 100m (fallback)
-  const q2 = `
-    [out:json][timeout:20];
-    (
-      node(around:100,${lat},${lng})["wheelchair"];
-      way(around:100,${lat},${lng})["wheelchair"];
-      relation(around:100,${lat},${lng})["wheelchair"];
-    );
-    out center tags 5;`
-
-  // q3: Accessibility sub-features within 150m — elevator nodes, entrance nodes,
-  //     accessible toilets, disabled parking areas, steps, kerb nodes
-  //     These are separate OSM objects that carry the real measurement data
-  const q3 = `
-    [out:json][timeout:20];
+function subQuery(lat: number, lng: number) {
+  return `
+    [out:json][timeout:9];
     (
       node(around:150,${lat},${lng})["highway"="elevator"];
       node(around:150,${lat},${lng})["amenity"="toilets"]["wheelchair"="yes"];
@@ -181,10 +141,36 @@ export async function fetchOsmDetails(lat: number, lng: number, signal?: AbortSi
       node(around:150,${lat},${lng})["tactile_paving"="yes"];
     );
     out center tags 30;`
+}
+
+async function fetchViaOverpass(lat: number, lng: number, signal?: AbortSignal): Promise<OsmData | null> {
+  // q1: Named elements within 200m (catches large buildings as relations)
+  const q1 = `
+    [out:json][timeout:9];
+    (
+      node(around:200,${lat},${lng})["name"];
+      way(around:200,${lat},${lng})["name"];
+      relation(around:200,${lat},${lng})["name"];
+    );
+    out center tags 20;`
+
+  // q2: Any wheelchair-tagged element within 100m (fallback)
+  const q2 = `
+    [out:json][timeout:9];
+    (
+      node(around:100,${lat},${lng})["wheelchair"];
+      way(around:100,${lat},${lng})["wheelchair"];
+      relation(around:100,${lat},${lng})["wheelchair"];
+    );
+    out center tags 5;`
+
+  // q3: Accessibility sub-features within 150m — elevator nodes, entrance nodes,
+  //     accessible toilets, disabled parking areas, steps, kerb nodes
+  //     These are separate OSM objects that carry the real measurement data
+  const q3 = subQuery(lat, lng)
 
   let elements: any[] = []
   let subElements: any[] = []
-  let mainEl: any = null
 
   try {
     const [data1, data3] = await Promise.all([
@@ -220,8 +206,42 @@ export async function fetchOsmDetails(lat: number, lng: number, signal?: AbortSi
     return { el, t, score }
   })
   scored.sort((a, b) => b.score - a.score)
-  mainEl = scored[0].el
-  const mainTags: Record<string, string> = scored[0].t
+  return buildOsmData(scored[0].el, scored[0].t, subElements, true)
+}
+
+/** Accessibility sub-features (elevators, entrances, toilets, parking…) around a point. */
+async function fetchSubElements(lat: number, lng: number, signal?: AbortSignal): Promise<any[]> {
+  const data = await overpassQuery(subQuery(lat, lng), signal)
+  return data?.elements ?? []
+}
+
+/**
+ * Accessibility details for a place. With a known OSM id the main tags come
+ * from Nominatim (well under a second) and `onQuick` fires right away; the
+ * nearby sub-features from Overpass are merged in afterwards when it answers.
+ */
+export async function fetchOsmDetails(
+  lat: number, lng: number, signal?: AbortSignal,
+  opts: { osmId?: string; name?: string; onQuick?: (d: OsmData) => void } = {},
+): Promise<OsmData | null> {
+  let osmId = opts.osmId && /^(node|way|relation)\/\d+$/.test(opts.osmId) ? opts.osmId : undefined
+  // No id (e.g. a curated place or a map-tile place): match it by name right at its position.
+  if (!osmId && opts.name) osmId = (await nominatimByName(opts.name, [lat, lng], signal)) ?? undefined
+  if (!osmId) return fetchViaOverpass(lat, lng, signal)
+  const [main, subs] = await Promise.all([
+    nominatimLookup(osmId, signal).then(async (m) => {
+      if (m && opts.onQuick && !signal?.aborted) opts.onQuick(await buildOsmData(elRef(osmId!), m.tags, [], false))
+      return m
+    }),
+    fetchSubElements(lat, lng, signal).catch((e) => { if (e?.name === 'AbortError') throw e; return [] as any[] }),
+  ])
+  if (!main) return fetchViaOverpass(lat, lng, signal).catch(() => null)
+  return buildOsmData(elRef(osmId), main.tags, subs, true)
+}
+
+const elRef = (osmId: string) => { const [type, id] = osmId.split('/'); return { type, id } }
+
+async function buildOsmData(mainEl: { type: string; id: string | number }, mainTags: Record<string, string>, subElements: any[], enrich: boolean): Promise<OsmData> {
 
   // Merge sub-element tags into main tags for richer data
   const subTags = subElements.map((el: any) => el.tags ?? {} as Record<string, string>)
@@ -335,7 +355,7 @@ export async function fetchOsmDetails(lat: number, lng: number, signal?: AbortSi
   let wikidataWebsite: string | undefined
 
   const qid = t.wikidata?.trim()
-  if (qid && /^Q\d+$/.test(qid)) {
+  if (enrich && qid && /^Q\d+$/.test(qid)) {
     try {
       // SPARQL: fetch image (P18), Commons category (P373), website (P856),
       // wheelchair accessibility (P5630), accessible to disabled (P2846)
@@ -396,7 +416,7 @@ export async function fetchOsmDetails(lat: number, lng: number, signal?: AbortSi
     imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file.replace(/ /g, '_'))}?width=800`
   } else if (wikidataImage) {
     imageUrl = wikidataImage
-  } else if (t.name) {
+  } else if (enrich && t.name) {
     imageUrl = await Promise.race([
       fetchWikiImage(t.name),
       new Promise<undefined>(res => setTimeout(() => res(undefined), 2500)),
