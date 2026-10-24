@@ -12,7 +12,7 @@ import { useStore } from '../store/useStore'
  */
 export default function TopBar() {
   const { pathname } = useLocation()
-  const mapScreen = pathname === '/' || pathname === '/map'
+  const mapScreen = pathname === '/map'
 
   const user = useStore((s) => s.user)
   const setMenuOpen = useStore((s) => s.setMenuOpen)

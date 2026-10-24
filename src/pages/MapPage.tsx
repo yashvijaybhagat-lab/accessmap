@@ -179,8 +179,11 @@ export default function MapPage() {
   }, [])
 
   // Search overlay picked a place → fly the map there (and stop following the user).
+  // Set when the map opened for a searched place, so the first GPS fix doesn't pull the view away.
+  const keepViewRef = useRef(false)
   useEffect(() => {
     if (!mapTarget) return
+    keepViewRef.current = true
     setFollowing(false)
     setCenter([mapTarget.lat, mapTarget.lng])
     setFocus({ lat: mapTarget.lat, lng: mapTarget.lng, zoom: mapTarget.zoom ?? 15 })
@@ -227,7 +230,7 @@ export default function MapPage() {
     setLocNotice({ kind, msg: `Showing an approximate area based on your internet connection — it can be 5–15 km off. ${how}` })
     if (userLocRef.current) return // keep the last real fix on screen
     const c = await ipCoords()
-    if (c && !userLocRef.current) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
+    if (c && !userLocRef.current && !keepViewRef.current) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
   }
 
   /**
@@ -254,7 +257,7 @@ export default function MapPage() {
             ? { kind: 'coarse', msg: `Your position is only accurate to about ${(accuracy / 1000).toFixed(1)} km. Turn on Wi-Fi or GPS for a precise location.` }
             : null,
         )
-        if (first) { setCenter([lat, lng]); setFollowing(true); setFocus({ lat, lng, zoom: zoomForAccuracy(accuracy) }) }
+        if (first && !keepViewRef.current) { setCenter([lat, lng]); setFollowing(true); setFocus({ lat, lng, zoom: zoomForAccuracy(accuracy) }) }
         else if (followRef.current) setFocus({ lat, lng, follow: true })
       },
       (err) => {

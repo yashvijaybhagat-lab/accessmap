@@ -61,7 +61,7 @@ export default function SearchOverlay() {
     setRecent(next); saveRecent(next)
     flyTo({ lat: r.lat, lng: r.lng, zoom: 15, label: r.shortName })
     setOpen(false)
-    navigate('/')
+    navigate('/map')
   }
 
   const list = q.trim().length >= 3 ? results : recent
