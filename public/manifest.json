@@ -2,7 +2,7 @@
   "name": "AccessMap — accessibility intelligence",
   "short_name": "AccessMap",
   "description": "AI-powered accessibility intelligence — find accessible places near you",
-  "start_url": "/?source=pwa",
+  "start_url": "/map?source=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -17,7 +17,7 @@
     { "src": "/pin.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Open the map", "url": "/" },
+    { "name": "Open the map", "url": "/map" },
     { "name": "Plan a step-free route", "url": "/route" },
     { "name": "Report a barrier", "url": "/report" }
   ]

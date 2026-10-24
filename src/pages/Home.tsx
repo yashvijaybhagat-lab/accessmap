@@ -1,511 +1,470 @@
-import { useEffect, useRef, useState, lazy, Suspense } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  MapPin, ArrowRight, Star, ShieldCheck, Ear, Eye,
-  CheckCircle2, Users, Zap, Camera, Cpu, Building2, Bus,
-  TrendingUp, Scale, Globe, BadgeCheck, Route as RouteIcon,
-  Accessibility, Heart, Lock, ChevronRight,
+  MapPin, ArrowRight, Star, ShieldCheck, Ear, Eye, Brain, Accessibility,
+  CheckCircle2, Users, Camera, Building2, Route as RouteIcon, Navigation,
+  Footprints, DoorOpen, ArrowUpDown, Toilet, Car, Volume2, Mountain, Bell,
+  Flag, Layers, GraduationCap, AlertOctagon, Globe, Sparkles, Database,
+  ChevronDown, Lock, Smartphone, Type, Contrast,
 } from 'lucide-react'
 import Layout from '../components/Layout'
 // Aurora pulls the WebGL (ogl) runtime — lazy-loaded so the hero text paints
 // immediately and the animated background fades in afterwards.
 const Aurora = lazy(() => import('../components/reactbits/Aurora'))
 import GradientText from '../components/reactbits/GradientText'
-import ShinyText from '../components/reactbits/ShinyText'
 import { getHomeReviews } from '../lib/data'
 import type { Review } from '../types'
 
-// ─── Animated counter ─────────────────────────────────────────────────────────
-function Counter({ to, suffix = '', duration = 1800 }: { to: number; suffix?: string; duration?: number }) {
-  const [val, setVal] = useState(0)
-  const ref = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => {
-      if (!e.isIntersecting) return
-      obs.disconnect()
-      const start = performance.now()
-      const tick = (now: number) => {
-        const p = Math.min((now - start) / duration, 1)
-        const ease = 1 - Math.pow(1 - p, 3)
-        setVal(Math.round(ease * to))
-        if (p < 1) requestAnimationFrame(tick)
-      }
-      requestAnimationFrame(tick)
-    }, { threshold: 0.3 })
-    if (ref.current) obs.observe(ref.current)
-    return () => obs.disconnect()
-  }, [to, duration])
-  return <span ref={ref}>{val.toLocaleString()}{suffix}</span>
-}
+/* Everything on this page describes features that exist in the app today.
+ * Keep it that way — no invented numbers, venues or "AI-verified" claims. */
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const FEATURES = [
-  'Ramp gradient & width', 'Handrail presence', 'Step count & height',
-  'Kerb type (flush / lowered)', 'Door width & type (auto/manual)',
-  'Lift dimensions (W × D)', 'Accessible WC with grab rails',
-  'WC turning space (min. 150cm)', 'Disabled parking spaces',
-  'Hearing loop availability', 'Braille & tactile signage',
-  'Quiet / sensory rooms', 'Changing Place facilities',
-  'Assistance dog welcome', 'Wheelchair seating count',
+// ─── What a place page tells you ──────────────────────────────────────────────
+const DETAILS = [
+  { icon: Footprints, title: 'Entrance & steps', body: 'Step-free or not, how many steps, how tall, and the kerb type outside.' },
+  { icon: ArrowUpDown, title: 'Ramps & lifts', body: 'Ramp gradient, width and handrails. Lift door width and cabin depth.' },
+  { icon: DoorOpen, title: 'Doors', body: 'Automatic or manual, revolving, and the clear width in centimetres.' },
+  { icon: Toilet, title: 'Accessible toilets', body: 'Whether there is one, grab rails, turning space, Changing Places.' },
+  { icon: Car, title: 'Parking', body: 'Disabled parking and how many spaces, where it has been mapped.' },
+  { icon: Ear, title: 'Hearing', body: 'Hearing loops and other support for deaf and hard-of-hearing visitors.' },
+  { icon: Eye, title: 'Vision', body: 'Tactile paving, braille menus and tactile or audio signage.' },
+  { icon: Brain, title: 'Sensory', body: 'Quiet and sensory rooms, plus a plain-language “what to expect”.' },
 ]
 
-const HOW_STEPS = [
+// ─── Needs ────────────────────────────────────────────────────────────────────
+const NEEDS = [
   {
-    n: '01', icon: Camera, color: '#0ABFBF',
-    title: 'Community snaps a photo',
-    body: 'Any visitor can photograph a ramp, entrance, or restroom. No training needed.',
+    icon: Accessibility, color: '#1a73e8', title: 'Wheelchair & mobility',
+    points: ['Filter the map to step-free places', 'Routes for manual chairs, power chairs, canes and walkers', 'Ramps, lifts, door widths and kerbs on every place'],
   },
   {
-    n: '02', icon: Cpu, color: '#1a73e8',
-    title: 'AI reads the scene',
-    body: 'Computer-vision models detect barriers, measure door widths, count steps — instantly and consistently at global scale.',
-    badge: 'AI moat',
+    icon: Eye, color: '#7c3aed', title: 'Blind & low vision',
+    points: ['Full screen-reader support and a keyboard list view (press L)', 'Read-aloud for place descriptions', 'Low-vision routes and high-contrast, large-text modes'],
   },
   {
-    n: '03', icon: RouteIcon, color: '#7c3aed',
-    title: 'Trusted score + step-free route',
-    body: 'Verified scores publish in seconds. Users get reliable ratings and turn-by-turn step-free navigation before they arrive.',
+    icon: Ear, color: '#0a8f8f', title: 'Deaf & hard of hearing',
+    points: ['Hearing-loop filter on the map', 'Everything shown in text — nothing relies on sound', 'Optional vibration for alerts'],
+  },
+  {
+    icon: Brain, color: '#c2410c', title: 'Autism, sensory & cognitive',
+    points: ['Quiet-room filter and a dedicated sensory map', 'Plain-language descriptions of what to expect', 'Reduce motion, readable font and reading guide'],
   },
 ]
 
-const B2B = [
-  { icon: Building2, color: '#1a73e8', label: 'Retail & hospitality', body: 'Prove ADA compliance. Attract the $490B disability market.' },
-  { icon: Bus,       color: '#0ABFBF', label: 'Transit authorities',   body: 'Real-time lift/ramp status. Accessible journey planning.' },
-  { icon: Globe,     color: '#7c3aed', label: 'Municipalities',        body: 'City-scale audit data + remediation tracking.' },
-  { icon: Users,     color: '#f97316', label: 'Real estate',           body: 'Accessibility ratings across your entire portfolio.' },
+// ─── Route profiles (src/lib/routing.ts) ──────────────────────────────────────
+const ROUTE_PROFILES = ['Manual wheelchair', 'Power chair / scooter', 'Cane, walker or low stamina', 'Blind or low vision', 'Walking']
+
+// ─── App settings presets (src/lib/a11y.ts) ──────────────────────────────────
+const PRESETS = ['Low vision', 'Blind / screen reader', 'Colour blind', 'Deaf / hard of hearing', 'Wheelchair / limited dexterity', 'Dyslexia / cognitive', 'Vestibular / seizure / migraine', 'Autism / sensory']
+
+// ─── More tools ───────────────────────────────────────────────────────────────
+const TOOLS = [
+  { to: '/alerts', icon: Bell, title: 'Live alerts', body: 'Reported barriers and official lift outages from transit agencies.' },
+  { to: '/trails', icon: Mountain, title: 'Accessible trails', body: 'Trails filtered by length, difficulty, surface and wheelchair access.' },
+  { to: '/scan', icon: Camera, title: 'Photo scan', body: 'Point your camera at an entrance — AI flags steps, ramps, lifts and grab rails.' },
+  { to: '/sensory', icon: Brain, title: 'Sensory map', body: 'Find calmer places and quiet spaces.' },
+  { to: '/schools', icon: GraduationCap, title: 'Accessible schools', body: 'School accessibility and how to raise a complaint.' },
+  { to: '/disaster', icon: AlertOctagon, title: 'Disaster access', body: 'Accessible help during declared disasters.' },
+  { to: '/for-business', icon: Building2, title: 'For businesses', body: 'List your venue and show visitors what to expect.' },
+  { to: '/councils', icon: Globe, title: 'For councils', body: 'Model the impact of mapping your area and plan improvements.' },
 ]
 
-
-const WHY_NOW = [
-  { stat: 1.3, suffix: 'B', label: 'people globally with a disability', src: 'WHO 2023' },
-  { stat: 490, suffix: 'B', label: 'US disability consumer spending', src: 'Accenture 2023' },
-  { stat: 67, suffix: '%', label: 'rise in ADA lawsuits over 5 years', src: 'Seyfarth 2024' },
-  { stat: 50, suffix: 'M+', label: 'venues in the AccessMap database', src: 'OpenStreetMap' },
+const FAQ = [
+  {
+    q: 'Is AccessMap free?',
+    a: 'Yes. Searching the map, place details and routes are free and need no account. You only sign in to write reviews, report barriers or add details.',
+  },
+  {
+    q: 'Where does the data come from?',
+    a: 'Places and their accessibility details come from OpenStreetMap, the open map built by volunteers, plus reports from AccessMap users. Every rating says which one it comes from.',
+  },
+  {
+    q: 'What does “~6.0” or “Estimated” mean?',
+    a: 'Many places have not been checked by anyone yet. For those we show an estimate based on the type of place, marked with “~”, and list them after places with real ratings. You can add the real details in a few taps.',
+  },
+  {
+    q: 'Does it track my location?',
+    a: 'Your location is only used on your device to show nearby places and plan routes. It is never stored without your consent.',
+  },
+  {
+    q: 'Can I install it like an app?',
+    a: 'Yes. Use “Add to home screen” in your browser’s menu and AccessMap opens full-screen like a normal app — no app store needed.',
+  },
 ]
 
-// ─── Reviews section ──────────────────────────────────────────────────────────
-function ScoreDot({ val }: { val: number }) {
-  const color = val >= 8 ? '#1e8e3e' : val >= 5 ? '#f59e0b' : '#ea4335'
-  return <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} aria-hidden="true" />
-}
-
+// ─── Reviews (real, from the database) ────────────────────────────────────────
 function ReviewsSection() {
   const [reviews, setReviews] = useState<Review[]>([])
   const [loading, setLoading] = useState(true)
+  useEffect(() => { getHomeReviews(6).then((r) => { setReviews(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
+  const avg = (r: Review) => Math.round(((r.scores.mobility + r.scores.sensory + r.scores.hearing + r.scores.vision) / 4) * 10) / 10
 
-  useEffect(() => {
-    getHomeReviews(6).then(r => { setReviews(r); setLoading(false) })
-  }, [])
-
-  const avg = (r: Review) =>
-    Math.round((r.scores.mobility + r.scores.sensory + r.scores.hearing + r.scores.vision) / 4 * 10) / 10
+  // Nothing to show yet → keep the page short rather than an empty block.
+  if (!loading && reviews.length === 0) return null
 
   return (
-    <section aria-labelledby="reviews-heading" className="bg-[#f8f9fa] border-y border-border px-6 py-16">
-      <div className="mx-auto max-w-5xl">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-10">
-          <div>
-            <h2 id="reviews-heading" className="text-2xl font-semibold text-ink">Community reviews</h2>
-            <p className="mt-1 text-muted text-sm">Real experiences from real people.</p>
-          </div>
-          <Link
-            to="/submit-review"
-            className="inline-flex items-center gap-2 rounded-full bg-[#1a73e8] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1557b0] transition-colors shadow-sm self-start sm:self-auto"
-          >
-            <Star size={14} aria-hidden="true" />
-            Write a review
-          </Link>
+    <section aria-labelledby="reviews-heading" className="mx-auto max-w-5xl px-5 py-16">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="label">From the community</p>
+          <h2 id="reviews-heading" className="mt-2 text-2xl font-semibold text-ink sm:text-3xl">Recent reviews</h2>
         </div>
-
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-48 rounded-2xl bg-white border border-border animate-pulse" />
-            ))}
-          </div>
-        ) : reviews.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border bg-white py-20 text-center px-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#f1f3f4] mb-4">
-              <Star size={28} className="text-[#dadce0]" aria-hidden="true" />
-            </div>
-            <p className="font-semibold text-ink text-lg">No reviews yet</p>
-            <p className="mt-2 max-w-sm text-muted text-sm leading-relaxed">
-              Be the first to share your experience finding an accessible venue.
-              Your review helps millions of people navigate the world.
-            </p>
-            <Link
-              to="/submit-review"
-              className="mt-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-6 py-2.5 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Star size={14} aria-hidden="true" />
-              Add the first review
-            </Link>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {reviews.map(r => (
-              <figure key={r.id} className="flex flex-col gap-3 rounded-2xl border border-border bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {r.userPhoto ? (
-                      <img src={r.userPhoto} alt="" className="h-8 w-8 rounded-full border border-border" />
-                    ) : (
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1f3f4] text-xs font-bold text-muted">
-                        {r.userName.charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div>
-                      <p className="text-sm font-semibold text-ink leading-none">{r.userName}</p>
-                      <p className="text-[11px] text-muted mt-0.5">
-                        {new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 rounded-full bg-[#f8f9fa] border border-border px-2.5 py-1">
-                    <ScoreDot val={avg(r)} />
-                    <span className="text-sm font-bold text-ink">{avg(r)}</span>
-                  </div>
-                </div>
-
-                {r.placeName && (
-                  <p className="text-[11px] font-medium text-primary truncate">{r.placeName}</p>
-                )}
-
-                <blockquote className="text-sm text-ink leading-relaxed flex-1 line-clamp-4">
-                  "{r.body}"
-                </blockquote>
-
-                <div className="grid grid-cols-4 gap-1 pt-2 border-t border-border">
-                  {(['mobility', 'hearing', 'vision', 'sensory'] as const).map(dim => (
-                    <div key={dim} className="text-center">
-                      <p className="text-[10px] text-muted capitalize">{dim}</p>
-                      <p className="text-xs font-semibold text-ink">{r.scores[dim]}</p>
-                    </div>
-                  ))}
-                </div>
-              </figure>
-            ))}
-          </div>
-        )}
-
-        {reviews.length > 0 && (
-          <div className="mt-6 text-center">
-            <Link to="/submit-review" className="text-sm font-medium text-primary hover:underline">
-              Share your experience →
-            </Link>
-          </div>
-        )}
+        <Link to="/submit-review" className="btn-ghost self-start sm:self-auto"><Star size={15} aria-hidden="true" /> Write a review</Link>
       </div>
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => <div key={i} className="h-40 animate-pulse rounded-2xl border border-border bg-white" />)}
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {reviews.map((r) => (
+            <figure key={r.id} className="card flex flex-col gap-3 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <figcaption className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-ink">{r.userName}</p>
+                  {r.placeName && <p className="truncate text-xs font-medium text-primary">{r.placeName}</p>}
+                </figcaption>
+                <span className="shrink-0 rounded-lg bg-surface px-2 py-1 text-sm font-bold text-ink">{avg(r)}<span className="visually-hidden"> out of 10</span></span>
+              </div>
+              <blockquote className="line-clamp-4 flex-1 text-sm leading-relaxed text-ink/90">“{r.body}”</blockquote>
+            </figure>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Example result row (illustrative, mirrors the map's list) ────────────────
+function ExampleRow({ name, summary, score, source, real, est }: { name: string; summary: string; score: string; source: string; real?: boolean; est?: boolean }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#1a73e8]/10 text-[#1a73e8]" aria-hidden="true">
+        <MapPin size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">{name}</p>
+          <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-bold text-white ${est ? 'opacity-75' : ''}`} style={{ background: real ? '#1e8e3e' : '#a16207' }}>{score}</span>
+        </div>
+        <p className="truncate text-[13px] text-ink/80">{summary}</p>
+        <p className={`truncate text-xs ${real ? 'font-semibold text-[#1e8e3e]' : 'text-muted'}`}>{source}</p>
+      </div>
+    </div>
+  )
+}
+
 export default function Home() {
+  const [openFaq, setOpenFaq] = useState<number | null>(0)
+
   return (
     <Layout bare>
-
       {/* ── HERO ──────────────────────────────────────────────────────────── */}
-      <section aria-labelledby="hero-heading" className="relative mx-3 mt-3 overflow-hidden rounded-3xl bg-[#070B18] px-6 py-24 text-center sm:py-36">
-        <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+      <section aria-labelledby="hero-heading" className="relative mx-3 mt-3 overflow-hidden rounded-3xl bg-[#070B18] px-5 pb-14 pt-16 sm:px-10 sm:pb-20 sm:pt-24">
+        <div className="pointer-events-none absolute inset-0 opacity-80" aria-hidden="true">
           <Suspense fallback={null}>
-            <Aurora colorStops={['#0ABFBF', '#1a73e8', '#7C3AED']} amplitude={1.2} blend={0.5} />
+            <Aurora colorStops={['#0ABFBF', '#1a73e8', '#7C3AED']} amplitude={1.1} blend={0.5} />
           </Suspense>
         </div>
 
-        {/* Floating badge */}
-        <div className="relative z-10 mx-auto max-w-4xl">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-4 py-1.5 text-sm text-white/75 backdrop-blur-sm mb-8">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#0ABFBF] animate-pulse" aria-hidden="true" />
-            <ShinyText text="AI-powered accessibility intelligence" color="#c7ccd6" shineColor="#0ABFBF" speed={3} />
-          </div>
-
-          <h1 id="hero-heading" className="font-semibold tracking-tight text-white">
-            <span className="block text-5xl sm:text-7xl leading-[1.05]">The physical world,</span>
-            <span className="block text-5xl sm:text-7xl leading-[1.05] mt-2">
+        <div className="relative z-10 mx-auto grid max-w-5xl items-center gap-12 lg:grid-cols-[1.15fr_1fr]">
+          <div className="text-center lg:text-left">
+            <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1 text-sm text-white/80">
+              <Accessibility size={14} aria-hidden="true" /> Free accessibility map for everyone
+            </p>
+            <h1 id="hero-heading" className="mt-6 text-[2.6rem] font-semibold leading-[1.05] tracking-tight text-white sm:text-6xl">
+              Know before you go.{' '}
               <GradientText colors={['#0ABFBF', '#7df9ff', '#1a73e8', '#0ABFBF']} animationSpeed={5}>
-                mapped for everyone.
+                Every place, every need.
               </GradientText>
-            </span>
-          </h1>
-
-          <p className="mx-auto mt-7 max-w-2xl text-xl text-white/60 leading-relaxed">
-            AccessMap uses AI and community data to map ramps, step-free entrances, accessible restrooms,
-            and step-free routes — at a scale no human team can match.
-          </p>
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <Link to="/map" className="group inline-flex items-center gap-2 rounded-full bg-[#1a73e8] px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-[#1a73e8]/30 hover:bg-[#1557b0] transition-all">
-              Explore the map
-              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" aria-hidden="true" />
-            </Link>
-            <Link to="/for-business" className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/8 px-8 py-3.5 text-base font-semibold text-white backdrop-blur hover:bg-white/15 transition-all">
-              For businesses
-            </Link>
+            </h1>
+            <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-white/70 lg:mx-0">
+              AccessMap shows whether the places around you actually work for you — step-free entrances,
+              accessible toilets, door widths, lifts, hearing loops and quiet rooms — and plans a route
+              there that avoids steps and steep kerbs.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+              <Link to="/map" className="group inline-flex min-h-[52px] items-center gap-2 rounded-full bg-[#1a73e8] px-7 text-base font-semibold text-white shadow-lg shadow-[#1a73e8]/30 transition-colors hover:bg-[#1557b0]">
+                Open the map <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" aria-hidden="true" />
+              </Link>
+              <Link to="/route" className="inline-flex min-h-[52px] items-center gap-2 rounded-full border border-white/25 bg-white/10 px-7 text-base font-semibold text-white transition-colors hover:bg-white/20">
+                <Navigation size={17} aria-hidden="true" /> Plan a step-free route
+              </Link>
+            </div>
+            <ul className="mt-7 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-white/60 lg:justify-start">
+              <li className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#0ABFBF]" aria-hidden="true" /> No account needed</li>
+              <li className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#0ABFBF]" aria-hidden="true" /> Works worldwide</li>
+              <li className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#0ABFBF]" aria-hidden="true" /> Built on OpenStreetMap</li>
+            </ul>
           </div>
 
-          {/* Score preview cards */}
-          <div className="mx-auto mt-16 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Example accessibility scores">
-            {[
-              { icon: Accessibility, color: '#0ABFBF', label: 'Mobility',  score: '9.1' },
-              { icon: Ear,           color: '#1a73e8', label: 'Hearing',   score: '8.5' },
-              { icon: Eye,           color: '#7c3aed', label: 'Vision',    score: '7.8' },
-              { icon: Heart,         color: '#f97316', label: 'Sensory',   score: '8.2' },
-            ].map(({ icon: Icon, color, label, score }) => (
-              <div key={label} className="rounded-2xl border border-white/10 bg-white/6 p-4 backdrop-blur-sm text-center">
-                <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full border-2" style={{ borderColor: color }}>
-                  <span className="text-base font-bold text-white">{score}</span>
+          {/* Illustration of the results list */}
+          <figure className="mx-auto w-full max-w-sm" aria-label="Example of AccessMap search results">
+            <div className="overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/40">
+              <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f29900] text-white" aria-hidden="true"><Sparkles size={17} /></span>
+                <div>
+                  <p className="text-sm font-bold text-ink">Coffee</p>
+                  <p className="text-xs text-muted">23 places · best access first</p>
                 </div>
-                <Icon size={13} className="mx-auto mb-1" style={{ color }} aria-hidden="true" />
-                <p className="text-[11px] text-white/45">{label}</p>
               </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-white/25">Example — Royal Festival Hall, London · AI-verified</p>
-
-          {/* Trust strip */}
-          <div className="mt-10 flex flex-wrap justify-center gap-6 text-xs text-white/35">
-            <span className="flex items-center gap-1.5"><Lock size={11} aria-hidden="true" /> No credit card · Free forever</span>
-            <span className="flex items-center gap-1.5"><ShieldCheck size={11} aria-hidden="true" /> WCAG 2.2 AA target</span>
-            <span className="flex items-center gap-1.5"><BadgeCheck size={11} aria-hidden="true" /> OpenStreetMap + Wikidata</span>
-          </div>
+              <div className="divide-y divide-border">
+                <ExampleRow name="Corner café" summary="Step-free entrance. Accessible toilet." score="7.0" source="320 m · OpenStreetMap" real />
+                <ExampleRow name="Bakery on Main St" summary="Step-free entrance." score="6.0" source="540 m · 2 community reports" real />
+                <ExampleRow name="Station kiosk" summary="No access details mapped yet" score="~3.5" source="800 m · Estimated" est />
+              </div>
+            </div>
+            <figcaption className="mt-3 text-center text-xs text-white/45">Illustration — real results show places near you.</figcaption>
+          </figure>
         </div>
       </section>
 
-      {/* ── STATS ─────────────────────────────────────────────────────────── */}
-      <section aria-label="Key statistics" className="border-b border-border bg-white">
-        <div className="mx-auto grid max-w-5xl grid-cols-2 divide-x divide-y divide-border sm:grid-cols-4 sm:divide-y-0">
-          {WHY_NOW.map(({ stat, suffix, label, src }) => (
-            <div key={label} className="px-8 py-10 text-center">
-              <p className="text-4xl font-bold text-ink tabular-nums">
-                <Counter to={stat} suffix={suffix} />
-              </p>
-              <p className="mt-1.5 text-sm text-muted leading-snug">{label}</p>
-              <p className="mt-1 text-[10px] text-muted/50">{src}</p>
+      {/* ── WHAT YOU LEARN ────────────────────────────────────────────────── */}
+      <section aria-labelledby="details-heading" className="mx-auto max-w-5xl px-5 py-16 sm:py-20">
+        <div className="max-w-2xl">
+          <p className="label">What AccessMap tells you</p>
+          <h2 id="details-heading" className="mt-2 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
+            The details that decide whether you can get in.
+          </h2>
+          <p className="mt-4 text-lg leading-relaxed text-muted">
+            Star ratings and photos rarely say if there’s a step at the door. Every place on AccessMap has an
+            accessibility score out of 10 and, wherever it’s been mapped, the specifics behind it.
+          </p>
+        </div>
+        <ul className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {DETAILS.map(({ icon: Icon, title, body }) => (
+            <li key={title} className="card p-5">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true"><Icon size={19} /></span>
+              <h3 className="mt-3 font-semibold text-ink">{title}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-muted">{body}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* ── HOW RATINGS WORK ──────────────────────────────────────────────── */}
+      <section aria-labelledby="ratings-heading" className="px-3">
+        <div className="mx-auto max-w-5xl rounded-3xl bg-[#070B18] px-5 py-14 sm:px-12 sm:py-16">
+          <div className="max-w-2xl">
+            <p className="label text-[#0ABFBF]/80">Honest ratings</p>
+            <h2 id="ratings-heading" className="mt-2 text-3xl font-semibold leading-tight text-white sm:text-4xl">
+              You always know where a rating comes from.
+            </h2>
+            <p className="mt-4 text-lg leading-relaxed text-white/65">
+              Accessibility data is still missing for many places. Instead of hiding that, AccessMap labels every
+              score and puts places with real information first.
+            </p>
+          </div>
+          <div className="mt-10 grid gap-4 sm:grid-cols-3">
+            {[
+              { icon: Database, color: '#34d399', tag: 'OpenStreetMap', title: 'Mapped details', body: 'Tags volunteers have added to the open map — wheelchair access, steps, toilets, doors, lifts and more.' },
+              { icon: Users, color: '#60a5fa', tag: 'Community reports', title: 'Reported by people who went', body: 'Measurements and notes from AccessMap users. They fill gaps in the map and show up straight away.' },
+              { icon: Sparkles, color: '#fbbf24', tag: 'Estimated  ~', title: 'Best guess, clearly marked', body: 'When nobody has checked a place yet, the score is estimated from the type of place and listed last.' },
+            ].map(({ icon: Icon, color, tag, title, body }) => (
+              <div key={tag} className="rounded-2xl border border-white/10 bg-white/[0.06] p-6">
+                <div className="flex items-center gap-2">
+                  <Icon size={18} style={{ color }} aria-hidden="true" />
+                  <span className="text-sm font-semibold" style={{ color }}>{tag}</span>
+                </div>
+                <h3 className="mt-3 font-semibold text-white">{title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-white/60">{body}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-8 text-sm text-white/55">
+            Scores run from 0 to 10: <strong className="text-white/80">8.5+</strong> fully accessible, <strong className="text-white/80">6.5+</strong> accessible,
+            <strong className="text-white/80"> 4.5+</strong> partly accessible, below that limited or poor. Open any place to see exactly how its score was worked out.
+          </p>
+        </div>
+      </section>
+
+      {/* ── NEEDS ─────────────────────────────────────────────────────────── */}
+      <section aria-labelledby="needs-heading" className="mx-auto max-w-5xl px-5 py-16 sm:py-20">
+        <div className="max-w-2xl">
+          <p className="label">Built for every kind of need</p>
+          <h2 id="needs-heading" className="mt-2 text-3xl font-semibold leading-tight text-ink sm:text-4xl">Not just wheelchair access.</h2>
+          <p className="mt-4 text-lg leading-relaxed text-muted">
+            Set up a needs profile once and AccessMap ranks places by how well they match you, with a match percentage on each one.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+          {NEEDS.map(({ icon: Icon, color, title, points }) => (
+            <div key={title} className="card p-6">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl text-white" style={{ background: color }} aria-hidden="true"><Icon size={21} /></span>
+                <h3 className="text-lg font-semibold text-ink">{title}</h3>
+              </div>
+              <ul className="mt-4 space-y-2">
+                {points.map((pt) => (
+                  <li key={pt} className="flex items-start gap-2 text-[15px] leading-snug text-ink/85">
+                    <CheckCircle2 size={16} className="mt-0.5 shrink-0" style={{ color }} aria-hidden="true" /> {pt}
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ── THE PROBLEM ───────────────────────────────────────────────────── */}
-      <section aria-labelledby="problem-heading" className="mx-auto max-w-5xl px-6 py-20">
-        <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
+      {/* ── ROUTES + SETTINGS ─────────────────────────────────────────────── */}
+      <section aria-label="Routes and app settings" className="border-y border-border bg-white">
+        <div className="mx-auto grid max-w-5xl gap-12 px-5 py-16 sm:py-20 lg:grid-cols-2">
           <div>
-            <p className="label">The problem</p>
-            <h2 id="problem-heading" className="mt-3 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
-              The physical world is a black box for 1.3 billion people.
-            </h2>
-            <p className="mt-5 text-lg text-muted leading-relaxed">
-              Existing maps are sparse, manual, and hopelessly slow. A venue with 200 Google reviews
-              still has zero information on ramp width, door clearance, or whether the accessible
-              restroom is actually accessible.
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#15803d] text-white" aria-hidden="true"><RouteIcon size={21} /></span>
+            <h2 className="mt-4 text-2xl font-semibold text-ink sm:text-3xl">Routes without surprises</h2>
+            <p className="mt-3 leading-relaxed text-muted">
+              Pick how you travel and AccessMap plans a route for you, then checks it for steps, raised kerbs and steep
+              slopes along the way. If something on the route can’t be checked, it tells you instead of guessing.
             </p>
-            <p className="mt-4 text-lg text-muted leading-relaxed">
-              <strong className="text-ink">AccessMap fixes this with AI</strong> — extracting precise
-              measurements from community photos at a scale no volunteer network can match.
-            </p>
-            <Link to="/map" className="mt-7 inline-flex items-center gap-2 font-semibold text-primary hover:underline">
-              See it live <ChevronRight size={16} aria-hidden="true" />
+            <ul className="mt-5 flex flex-wrap gap-2" aria-label="Route profiles">
+              {ROUTE_PROFILES.map((p) => <li key={p} className="rounded-full border border-border bg-surface px-3 py-1 text-sm text-ink">{p}</li>)}
+            </ul>
+            <Link to="/route" className="mt-6 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline">
+              Plan a route <ArrowRight size={16} aria-hidden="true" />
             </Link>
           </div>
-          <div className="grid grid-cols-1 gap-4">
-            {[
-              { color: '#ea4335', title: 'Sparse', desc: 'Google Maps averages 1 accessibility tag per venue worldwide.' },
-              { color: '#f97316', title: 'Manual & slow', desc: 'Human volunteers cannot keep pace with the physical world changing daily.' },
-              { color: '#eab308', title: 'Dangerously stale', desc: 'Lifts reported working are out of service. Ramps have been removed. No one knows.' },
-            ].map(({ color, title, desc }) => (
-              <div key={title} className="flex items-start gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm">
-                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />
-                <div>
-                  <p className="font-semibold text-ink">{title}</p>
-                  <p className="mt-1 text-sm text-muted leading-relaxed">{desc}</p>
-                </div>
-              </div>
-            ))}
+          <div>
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7c3aed] text-white" aria-hidden="true"><Type size={21} /></span>
+            <h2 className="mt-4 text-2xl font-semibold text-ink sm:text-3xl">An app that adapts to you</h2>
+            <p className="mt-3 leading-relaxed text-muted">
+              Tap the accessibility button at the top of any screen. Choose a preset, or switch on just what you need —
+              text size, high contrast, colour-blind-safe colours, read aloud, reduced motion, a flat 2D map and more.
+            </p>
+            <ul className="mt-5 flex flex-wrap gap-2" aria-label="Accessibility presets">
+              {PRESETS.map((p) => <li key={p} className="rounded-full border border-border bg-surface px-3 py-1 text-sm text-ink">{p}</li>)}
+            </ul>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('am:open-a11y'))}
+              className="mt-6 inline-flex items-center gap-1.5 font-semibold text-primary hover:underline"
+            >
+              <Contrast size={16} aria-hidden="true" /> Open accessibility settings
+            </button>
           </div>
         </div>
       </section>
 
-      {/* ── HOW IT WORKS ──────────────────────────────────────────────────── */}
-      <section aria-labelledby="how-heading" className="px-3 pb-6">
-        <div className="mx-auto max-w-5xl overflow-hidden rounded-3xl bg-[#070B18] px-6 py-16 sm:px-12">
-          <div className="text-center mb-12">
-            <p className="label text-[#0ABFBF]/70">How it works</p>
-            <h2 id="how-heading" className="mt-2 text-3xl font-semibold text-white sm:text-4xl">
-              Community data. AI precision. Instant results.
-            </h2>
-          </div>
-
-          <div className="grid gap-5 sm:grid-cols-3">
-            {HOW_STEPS.map(({ n, icon: Icon, color, title, body, badge }) => (
-              <div key={n} className={`relative rounded-2xl p-6 ${badge ? 'border-2 border-[#1a73e8]/50 bg-[#1a73e8]/10' : 'border border-white/10 bg-white/5'}`}>
-                {badge && (
-                  <span className="absolute right-4 top-4 rounded-full bg-[#1a73e8]/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#93c5fd]">{badge}</span>
-                )}
-                <div className="flex items-center gap-3 mb-5">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: color }} aria-hidden="true">
-                    <Icon size={20} />
-                  </span>
-                  <span className="font-mono text-xs font-bold" style={{ color }}>{n}</span>
-                </div>
-                <p className="font-semibold text-white leading-snug mb-2">{title}</p>
-                <p className="text-sm text-white/55 leading-relaxed">{body}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Feature grid */}
-          <div className="mt-10 rounded-2xl border border-white/8 bg-white/4 p-6">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-white/40 text-center">Every detail we capture</p>
-            <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 sm:grid-cols-3 lg:grid-cols-5">
-              {FEATURES.map(f => (
-                <div key={f} className="flex items-center gap-1.5 text-xs text-white/55">
-                  <CheckCircle2 size={10} className="shrink-0 text-[#0ABFBF]" aria-hidden="true" />
-                  {f}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-8 text-center">
-            <Link to="/map" className="inline-flex items-center gap-2 rounded-full bg-[#1a73e8] px-8 py-3.5 text-base font-semibold text-white hover:bg-[#1557b0] transition-colors shadow-lg shadow-[#1a73e8]/30">
-              Try AccessMap free <ArrowRight size={18} aria-hidden="true" />
-            </Link>
-          </div>
-        </div>
+      {/* ── MORE TOOLS ────────────────────────────────────────────────────── */}
+      <section aria-labelledby="tools-heading" className="mx-auto max-w-5xl px-5 py-16 sm:py-20">
+        <p className="label">More in AccessMap</p>
+        <h2 id="tools-heading" className="mt-2 text-3xl font-semibold text-ink sm:text-4xl">More than a map.</h2>
+        <ul className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {TOOLS.map(({ to, icon: Icon, title, body }) => (
+            <li key={to}>
+              <Link to={to} className="card group flex h-full flex-col p-5 hover:-translate-y-0.5">
+                <Icon size={20} className="text-primary" aria-hidden="true" />
+                <h3 className="mt-3 font-semibold text-ink group-hover:text-primary">{title}</h3>
+                <p className="mt-1 flex-1 text-sm leading-relaxed text-muted">{body}</p>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
-      {/* ── FOR BUSINESS ──────────────────────────────────────────────────── */}
-      <section aria-labelledby="b2b-heading" className="mx-auto max-w-5xl px-6 py-16">
-        <div className="rounded-3xl border border-border bg-white p-8 sm:p-12 shadow-sm">
-          <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
+      {/* ── CONTRIBUTE ────────────────────────────────────────────────────── */}
+      <section aria-labelledby="help-heading" className="px-3">
+        <div className="mx-auto max-w-5xl rounded-3xl border border-border bg-gradient-to-br from-[#e8f0fe] to-white px-5 py-14 sm:px-12">
+          <div className="grid gap-10 lg:grid-cols-[1fr_1.2fr] lg:items-center">
             <div>
-              <p className="label">For businesses &amp; cities</p>
-              <h2 id="b2b-heading" className="mt-3 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
-                Prove your accessibility.<br />Cut legal risk.
-              </h2>
-              <p className="mt-4 text-lg text-muted leading-relaxed">
-                ADA litigation is up 67% in 5 years. The EU Accessibility Act is now in force.
-                AccessMap gives you the data to prove compliance and earn the trust of 1.3 billion customers.
+              <p className="label">Help fill the map</p>
+              <h2 id="help-heading" className="mt-2 text-3xl font-semibold leading-tight text-ink">Been somewhere? Two minutes helps the next person.</h2>
+              <p className="mt-4 leading-relaxed text-muted">
+                Every report turns an estimate into a real rating for everyone who comes after you.
               </p>
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Link to="/for-business" className="inline-flex items-center gap-2 rounded-full bg-[#1a73e8] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1557b0] transition-colors">
-                  Request data access <ArrowRight size={15} aria-hidden="true" />
-                </Link>
-                <Link to="/councils" className="inline-flex items-center gap-2 rounded-full border border-border px-6 py-2.5 text-sm font-semibold text-ink hover:bg-[#f8f9fa] transition-colors">
-                  For municipalities
-                </Link>
-              </div>
-              <div className="mt-6 flex flex-wrap gap-4 text-sm text-muted">
-                <span className="flex items-center gap-1.5"><Scale size={13} className="text-[#1a73e8]" aria-hidden="true" /> ADA Title II compliance</span>
-                <span className="flex items-center gap-1.5"><TrendingUp size={13} className="text-[#0ABFBF]" aria-hidden="true" /> EU Accessibility Act</span>
-                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-[#7c3aed]" aria-hidden="true" /> Verified Accessible badge</span>
-              </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {B2B.map(({ icon: Icon, color, label, body }) => (
-                <div key={label} className="rounded-2xl border border-border bg-[#f8f9fa] p-4">
-                  <Icon size={18} style={{ color }} aria-hidden="true" className="mb-2.5" />
-                  <p className="font-semibold text-ink text-sm">{label}</p>
-                  <p className="mt-1 text-xs text-muted leading-relaxed">{body}</p>
-                </div>
+            <ol className="grid gap-3 sm:grid-cols-3">
+              {[
+                { to: '/map', icon: Layers, title: 'Add details', body: 'Open a place → Add specs: steps, doors, toilet, parking.' },
+                { to: '/submit-review', icon: Star, title: 'Write a review', body: 'Score it for mobility, hearing, vision and sensory needs.' },
+                { to: '/report', icon: Flag, title: 'Report a barrier', body: 'Broken lift, blocked ramp? Warn others straight away.' },
+              ].map(({ to, icon: Icon, title, body }) => (
+                <li key={title}>
+                  <Link to={to} className="card flex h-full flex-col p-5 hover:-translate-y-0.5">
+                    <Icon size={20} className="text-primary" aria-hidden="true" />
+                    <h3 className="mt-3 font-semibold text-ink">{title}</h3>
+                    <p className="mt-1 text-sm leading-relaxed text-muted">{body}</p>
+                  </Link>
+                </li>
               ))}
-            </div>
+            </ol>
           </div>
         </div>
       </section>
 
-      {/* ── REVIEWS ───────────────────────────────────────────────────────── */}
       <ReviewsSection />
 
-      {/* ── WHY NOW ───────────────────────────────────────────────────────── */}
-      <section aria-labelledby="why-heading" className="px-3 py-6">
-        <div className="mx-auto max-w-5xl overflow-hidden rounded-3xl bg-[#070B18] px-6 py-16 sm:px-12">
-          <div className="text-center mb-10">
-            <p className="label text-[#0ABFBF]/70">Why now</p>
-            <h2 id="why-heading" className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Regulation + market are converging.</h2>
-            <p className="mx-auto mt-4 max-w-xl text-white/55 leading-relaxed">
-              This isn't charity — it's a $490B market. Legal pressure and demographic shift are creating urgent demand for accessibility data infrastructure.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {[
-              { n: '↑67%', label: 'ADA accessibility lawsuits (5yr)', color: '#ea4335' },
-              { n: 'Jun 2025', label: 'EU Accessibility Act in force', color: '#0ABFBF' },
-              { n: '10,000+', label: 'new disabled people daily (US)', color: '#f97316' },
-              { n: '$490B', label: 'US disability spending power', color: '#1a73e8' },
-            ].map(({ n, label, color }) => (
-              <div key={n} className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
-                <p className="text-2xl font-bold" style={{ color }}>{n}</p>
-                <p className="mt-2 text-xs text-white/50 leading-snug">{label}</p>
+      {/* ── FAQ ───────────────────────────────────────────────────────────── */}
+      <section aria-labelledby="faq-heading" className="mx-auto max-w-3xl px-5 py-16">
+        <h2 id="faq-heading" className="text-center text-3xl font-semibold text-ink">Questions</h2>
+        <div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-white">
+          {FAQ.map(({ q, a }, i) => {
+            const open = openFaq === i
+            return (
+              <div key={q}>
+                <h3>
+                  <button
+                    onClick={() => setOpenFaq(open ? null : i)}
+                    aria-expanded={open}
+                    aria-controls={`faq-${i}`}
+                    className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left font-semibold text-ink hover:bg-surface/60"
+                  >
+                    {q}
+                    <ChevronDown size={18} className={`shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
+                </h3>
+                <div id={`faq-${i}`} hidden={!open} className="px-5 pb-5 leading-relaxed text-muted">{a}</div>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
       </section>
 
       {/* ── CTA ───────────────────────────────────────────────────────────── */}
-      <section aria-labelledby="cta-heading" className="px-3 pb-16">
-        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl bg-[#070B18] px-6 py-20 text-center">
+      <section aria-labelledby="cta-heading" className="px-3 pb-14">
+        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl bg-[#070B18] px-5 py-16 text-center">
           <div className="pointer-events-none absolute inset-0 opacity-60" aria-hidden="true">
             <Suspense fallback={null}>
               <Aurora colorStops={['#1a73e8', '#0ABFBF', '#1a73e8']} amplitude={0.8} blend={0.5} />
             </Suspense>
           </div>
           <div className="relative z-10">
-            <Zap className="mx-auto mb-4 text-[#0ABFBF]" size={36} aria-hidden="true" />
-            <h2 id="cta-heading" className="text-3xl font-semibold text-white sm:text-5xl leading-tight">
-              Build the world's<br />accessibility layer with us.
-            </h2>
-            <p className="mx-auto mt-5 max-w-lg text-white/55 leading-relaxed text-lg">
-              Every photo, review, and correction you add feeds the AI and helps someone get where they need to go.
-            </p>
-            <div className="mt-9 flex flex-wrap justify-center gap-4">
-              <Link to="/map" className="group inline-flex items-center gap-2 rounded-full bg-[#1a73e8] px-9 py-4 text-lg font-semibold text-white shadow-xl shadow-[#1a73e8]/30 hover:bg-[#1557b0] transition-all">
-                Explore the map
-                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" aria-hidden="true" />
-              </Link>
-              <Link to="/for-business" className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/8 px-9 py-4 text-lg font-semibold text-white backdrop-blur hover:bg-white/15 transition-all">
-                Partner with us
-              </Link>
-            </div>
+            <h2 id="cta-heading" className="text-3xl font-semibold leading-tight text-white sm:text-5xl">See what’s accessible near you.</h2>
+            <p className="mx-auto mt-4 max-w-lg text-lg text-white/65">Free, no sign-up — just open the map.</p>
+            <Link to="/map" className="group mt-8 inline-flex min-h-[54px] items-center gap-2 rounded-full bg-[#1a73e8] px-9 text-lg font-semibold text-white shadow-xl shadow-[#1a73e8]/30 transition-colors hover:bg-[#1557b0]">
+              Open the map <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" aria-hidden="true" />
+            </Link>
           </div>
         </div>
       </section>
 
       {/* ── FOOTER ────────────────────────────────────────────────────────── */}
-      <footer className="border-t border-border bg-white py-14 text-center text-sm text-muted" role="contentinfo">
-        <div className="mx-auto max-w-5xl px-6">
-          <div className="flex items-center justify-center gap-2 mb-2">
+      <footer className="border-t border-border bg-white py-12 text-center text-sm text-muted">
+        <div className="mx-auto max-w-5xl px-5">
+          <div className="flex items-center justify-center gap-2">
             <MapPin size={16} className="text-primary" aria-hidden="true" />
             <span className="text-base font-bold text-ink">Access<span className="text-primary">Map</span></span>
           </div>
-          <p className="text-sm text-muted">AI-powered accessibility intelligence · Built for 1.3B people</p>
-
-          <nav aria-label="Footer navigation" className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm">
+          <nav aria-label="Footer" className="mt-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
             <Link to="/map" className="hover:text-ink hover:underline">Map</Link>
-            <Link to="/route" className="hover:text-ink hover:underline">Route planner</Link>
-            <Link to="/for-business" className="hover:text-ink hover:underline">For Business</Link>
-            <Link to="/councils" className="hover:text-ink hover:underline">For Councils</Link>
-            <Link to="/accessibility" className="font-medium text-primary hover:underline">Accessibility Statement</Link>
-            <Link to="/report" className="hover:text-ink hover:underline">Report an issue</Link>
+            <Link to="/route" className="hover:text-ink hover:underline">Routes</Link>
+            <Link to="/alerts" className="hover:text-ink hover:underline">Alerts</Link>
+            <Link to="/for-business" className="hover:text-ink hover:underline">For businesses</Link>
+            <Link to="/councils" className="hover:text-ink hover:underline">For councils</Link>
+            <Link to="/accessibility" className="font-medium text-primary hover:underline">Accessibility statement</Link>
             <Link to="/privacy" className="hover:text-ink hover:underline">Privacy</Link>
             <Link to="/terms" className="hover:text-ink hover:underline">Terms</Link>
           </nav>
-
-          <div className="mt-6 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs text-muted">
-            <span>Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap</a> contributors</span>
-            <span>Tiles © <a href="https://carto.com/attributions" target="_blank" rel="noreferrer" className="underline">CARTO</a></span>
-          </div>
-
-          <div className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-muted/60">
-            <span className="flex items-center gap-1.5"><BadgeCheck size={12} className="text-[#1e8e3e]" aria-hidden="true" /> WCAG 2.2 AA target</span>
-            <span className="flex items-center gap-1.5"><ShieldCheck size={12} className="text-primary" aria-hidden="true" /> AI-verified data</span>
-            <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-[#0ABFBF]" aria-hidden="true" /> Free for everyone</span>
-          </div>
-
-          <p className="mt-6 text-xs text-muted/40">
-            © {new Date().getFullYear()} AccessMap · Accessibility data is community-sourced and AI-assisted. Do not rely solely on AccessMap for safety-critical decisions.
+          <ul className="mt-5 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs">
+            <li className="flex items-center gap-1.5"><Lock size={12} aria-hidden="true" /> Location never stored without consent</li>
+            <li className="flex items-center gap-1.5"><Smartphone size={12} aria-hidden="true" /> Install it like an app</li>
+            <li className="flex items-center gap-1.5"><Volume2 size={12} aria-hidden="true" /> Read-aloud on every place</li>
+            <li className="flex items-center gap-1.5"><ShieldCheck size={12} aria-hidden="true" /> Free for everyone</li>
+          </ul>
+          <p className="mt-5 text-xs">
+            Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap</a> contributors ·
+            Map tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer" className="underline">OpenFreeMap</a> ·{' '}
+            <a href="https://openmaptiles.org" target="_blank" rel="noreferrer" className="underline">OpenMapTiles</a>
+          </p>
+          <p className="mt-4 text-xs text-muted/70">
+            © {new Date().getFullYear()} AccessMap · Accessibility information comes from OpenStreetMap and the community and can be out of date — check with the venue before safety-critical trips.
           </p>
         </div>
       </footer>

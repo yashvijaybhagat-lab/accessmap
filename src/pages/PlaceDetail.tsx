@@ -29,6 +29,7 @@ import type { OsmData } from '../lib/osmDetails'
 import type { Place, Review, Alert, AccessSpecs } from '../types'
 import { checkAdaCompliance } from '../lib/adaCompliance'
 import AccessDescription from '../components/AccessDescription'
+import ScoreFactors from '../components/ScoreFactors'
 import { describePlace } from '../lib/describe'
 import { routeHref } from '../components/PlaceSheet'
 import type { AdaFlag } from '../lib/adaCompliance'
@@ -81,7 +82,7 @@ export default function PlaceDetail() {
   const dragControls = useDragControls()
   function backToMap() {
     if (place) flyTo({ lat: place.lat, lng: place.lng, zoom: 17 })
-    navigate('/')
+    navigate('/map')
   }
 
   const osmAbort = useRef<AbortController | null>(null)
@@ -395,8 +396,8 @@ export default function PlaceDetail() {
               <p className="text-sm text-muted mt-0.5">{bd?.baseReason}</p>
               <p className="mt-1 text-xs text-muted flex items-center gap-1">
                 {bd?.confidence === 'low' || bd?.confidence === 'none'
-                  ? <><span className="text-[#f29900]">●</span> Estimated — limited mapping data</>
-                  : <><span className="text-[#1e8e3e]">●</span> Verified OpenStreetMap data</>
+                  ? <><span className="text-[#f29900]">●</span> Estimated — entrance not mapped yet</>
+                  : <><span className="text-[#1e8e3e]">●</span> Based on mapped details{bd?.factors?.some(f => f.source === 'measured') ? ' and measured surroundings' : ''}</>
                 }
               </p>
             </div>
@@ -410,10 +411,20 @@ export default function PlaceDetail() {
                 className="flex w-full items-center justify-between border-t border-border px-5 py-3 text-sm font-medium text-primary hover:bg-bg"
                 aria-expanded={breakdownOpen}
               >
-                <span>Score breakdown</span>
+                <span>How this score was worked out</span>
                 {breakdownOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </button>
-              {breakdownOpen && (
+              {breakdownOpen && bd.factors?.length ? (
+                <div className="border-t border-border bg-bg px-5 py-4">
+                  <ScoreFactors factors={bd.factors} />
+                  {(bd.bonuses.length > 0 || bd.penalties.length > 0) && (
+                    <div className="mt-3 space-y-1 border-t border-border pt-3 text-sm">
+                      {bd.bonuses.map(b => <div key={b.label} className="flex justify-between text-[#1e8e3e]"><span>{b.label}</span><span className="font-mono font-semibold">+{b.points}</span></div>)}
+                      {bd.penalties.map(p => <div key={p.label} className="flex justify-between text-[#c5221f]"><span>{p.label}</span><span className="font-mono font-semibold">{p.points}</span></div>)}
+                    </div>
+                  )}
+                </div>
+              ) : breakdownOpen && (
                 <div className="border-t border-border bg-bg px-5 py-4 text-sm space-y-1.5">
                   <div className="flex items-center justify-between text-ink">
                     <span>Base ({bd.baseReason})</span>

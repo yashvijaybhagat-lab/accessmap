@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import TopBar from './TopBar'
@@ -58,7 +58,11 @@ export default function AppShell() {
   const reduced = useReducedMotion()
   useScrollToTop()
 
-  const mapScreen = location.pathname === '/' || location.pathname === '/map'
+  const mapScreen = location.pathname === '/map'
+  // The map mounts on the first visit to /map (so the home page doesn't load it or ask
+  // for location), then stays mounted so its view survives navigating away and back.
+  const [mapMounted, setMapMounted] = useState(mapScreen)
+  useEffect(() => { if (mapScreen) setMapMounted(true) }, [mapScreen])
 
   // Mobile-only slide; desktop / reduced-motion is instant.
   const isNarrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
@@ -86,7 +90,7 @@ export default function AppShell() {
         style={mapScreen ? undefined : { visibility: 'hidden', position: 'fixed', inset: 0 }}
         aria-hidden={!mapScreen}
       >
-        <S fallback={<MapSkeleton />}><MapPage /></S>
+        {(mapMounted || mapScreen) && <S fallback={<MapSkeleton />}><MapPage /></S>}
       </div>
 
       {/* Every other screen slides in over the (hidden) map. */}
@@ -102,6 +106,7 @@ export default function AppShell() {
               transition={{ duration: reduced ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] }}
             >
               <Routes location={location}>
+                <Route path="/"               element={<S fallback={<HomeSkeleton />}><Home /></S>} />
                 <Route path="/about"          element={<S fallback={<HomeSkeleton />}><Home /></S>} />
                 <Route path="/place/:id"      element={<S fallback={<PlaceDetailSkeleton />}><PlaceDetail /></S>} />
                 <Route path="/route"          element={<S fallback={<RouteSkeleton />}><RoutePlanner /></S>} />

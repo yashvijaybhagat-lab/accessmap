@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { Map as MapIcon, Search, Route as RouteIcon, Bell, User } from 'lucide-react'
 import { useStore } from '../store/useStore'
 
@@ -11,7 +11,7 @@ type Item = { label: string; icon: typeof MapIcon } & (
 )
 
 const ITEMS: Item[] = [
-  { to: '/', label: 'Map', icon: MapIcon },
+  { to: '/map', label: 'Map', icon: MapIcon },
   { action: 'search', label: 'Search', icon: Search },
   { to: '/route', label: 'Routes', icon: RouteIcon },
   { to: '/alerts', label: 'Alerts', icon: Bell },
@@ -26,7 +26,6 @@ const ITEMS: Item[] = [
 export default function BottomNav() {
   const searchOpen = useStore((s) => s.searchOpen)
   const setSearchOpen = useStore((s) => s.setSearchOpen)
-  const { pathname } = useLocation()
 
   return (
     <nav
@@ -56,7 +55,7 @@ export default function BottomNav() {
             )
           }
 
-          const isMap = item.to === '/'
+          const isMap = item.to === '/map'
           return (
             <NavLink
               key={item.to}
@@ -65,13 +64,13 @@ export default function BottomNav() {
               aria-label={item.label}
               className="relative flex flex-1 flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[10px] font-semibold"
               style={({ isActive }) => {
-                // While search is open it owns the active state; the /map alias also lights the Map tab.
-                const active = !searchOpen && (isActive || (isMap && pathname === '/map'))
+                // While search is open it owns the active state.
+                const active = !searchOpen && isActive
                 return { color: active ? TEAL : 'rgba(255,255,255,0.55)', minHeight: 52 }
               }}
             >
               {({ isActive }) => {
-                const active = !searchOpen && (isActive || (isMap && pathname === '/map'))
+                const active = !searchOpen && isActive
                 return (
                   <>
                     {active && <span className="absolute top-0 h-0.5 w-8 rounded-full" style={{ background: TEAL }} />}

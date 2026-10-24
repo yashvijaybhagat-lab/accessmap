@@ -210,6 +210,33 @@ export default function RoutePlanner() {
 
   const startRef = useRef<GeoResult>(); startRef.current = start
   const endRef = useRef<GeoResult>(); endRef.current = end
+  // Which point the next tap on the map sets. Moves to B once A is placed.
+  const [tapTarget, setTapTarget] = useState<'A' | 'B'>('A')
+  const tapRef = useRef(tapTarget); tapRef.current = tapTarget
+  // Points placed by tapping/dragging shouldn't move the camera (the user is looking right there).
+  const keepCameraRef = useRef(false)
+
+  /** Set A or B. `fromMap` = tapped or dragged on the map. */
+  function setPoint(which: 'A' | 'B', g: GeoResult, fromMap = false) {
+    keepCameraRef.current = fromMap
+    if (which === 'A') setStart(g); else setEnd(g)
+    setRoute(null)
+    setTapTarget(which === 'A' && !endRef.current ? 'B' : which)
+  }
+  const setPointRef = useRef(setPoint); setPointRef.current = setPoint
+
+  /** Drop a pin instantly, then fill in its street name when the lookup answers. */
+  function dropPin(which: 'A' | 'B', lat: number, lng: number) {
+    setPointRef.current(which, { lat, lng, shortName: 'Dropped pin', displayName: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, osmId: 'pin' }, true)
+    reverseGeocode(lat, lng).then((g) => {
+      const cur = which === 'A' ? startRef.current : endRef.current
+      if (!cur || cur.lat !== lat || cur.lng !== lng) return // moved again meanwhile
+      keepCameraRef.current = true
+      const named = { ...g, lat, lng }
+      if (which === 'A') setStart(named); else setEnd(named)
+    })
+  }
+  const dropPinRef = useRef(dropPin); dropPinRef.current = dropPin
 
   useEffect(() => { try { localStorage.setItem('am.routeProfile', profile) } catch { /* */ } }, [profile])
 
@@ -227,7 +254,7 @@ export default function RoutePlanner() {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const g = await reverseGeocode(pos.coords.latitude, pos.coords.longitude)
         g.shortName = 'My location'
-        setStart((prev) => prev ?? g)
+        if (!startRef.current) { setStart(g); if (!endRef.current) setTapTarget('B') }
       }, () => {}, { enableHighAccuracy: true, timeout: 8000 })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,11 +267,7 @@ export default function RoutePlanner() {
     let map: MlMap
     try { map = createMap(elRef.current, { center: [39.5, -98.35], zoom: 3.5, label: 'Route map' }) } catch { setMapFailed(true); return }
     mapRef.current = map
-    map.on('click', async (e) => {
-      const g = await reverseGeocode(e.lngLat.lat, e.lngLat.lng)
-      if (!startRef.current) setStart(g)
-      else setEnd(g)
-    })
+    map.on('click', (e) => dropPinRef.current(tapRef.current, e.lngLat.lat, e.lngLat.lng))
     const ro = new ResizeObserver(() => map.resize())
     ro.observe(elRef.current)
     return () => { ro.disconnect(); map.remove(); mapRef.current = null }
@@ -268,8 +291,15 @@ export default function RoutePlanner() {
       el.setAttribute('role', 'img'); el.setAttribute('aria-label', label)
       return el
     }
-    if (start) markers.current.push(new maplibregl.Marker({ element: badge('A', '#15803d', `Start: ${start.shortName}`) }).setLngLat([start.lng, start.lat]).addTo(map))
-    if (end) markers.current.push(new maplibregl.Marker({ element: badge('B', '#c2410c', `Destination: ${end.shortName}`) }).setLngLat([end.lng, end.lat]).addTo(map))
+    const pin = (which: 'A' | 'B', g: GeoResult, color: string, label: string) => {
+      const m = new maplibregl.Marker({ element: badge(which, color, `${label}: ${g.shortName}. Drag to move.`), draggable: true })
+        .setLngLat([g.lng, g.lat]).addTo(map)
+      m.on('dragend', () => { const ll = m.getLngLat(); dropPinRef.current(which, ll.lat, ll.lng) })
+      markers.current.push(m)
+    }
+    if (start) pin('A', start, '#15803d', 'Start')
+    if (end) pin('B', end, '#c2410c', 'Destination')
+    if (keepCameraRef.current) { keepCameraRef.current = false; return }
     if (!route) {
       if (start && end) fitPoints(map, [[start.lat, start.lng], [end.lat, end.lng]], 80)
       else if (start) moveTo(map, start.lat, start.lng, 15)
@@ -359,6 +389,14 @@ export default function RoutePlanner() {
     } finally { if (!ac.signal.aborted) setBusy(false) }
   }
 
+  // Plan as soon as both points are set, and again whenever one of them moves.
+  useEffect(() => {
+    if (!start || !end) return
+    const t = setTimeout(() => plan(), 250)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start?.lat, start?.lng, end?.lat, end?.lng])
+
   // Re-plan automatically when the profile changes and a route is showing.
   function chooseProfile(p: ProfileId) {
     setProfile(p)
@@ -368,7 +406,7 @@ export default function RoutePlanner() {
   function reset() {
     abortRef.current?.abort()
     stopGuidance()
-    setStart(undefined); setEnd(undefined); setRoute(null); setErr(''); setWalkM(null)
+    setStart(undefined); setEnd(undefined); setRoute(null); setErr(''); setWalkM(null); setTapTarget('A')
   }
 
   function swap() { const s = start; setStart(end); setEnd(s); setRoute(null) }
@@ -478,8 +516,8 @@ export default function RoutePlanner() {
           </div>
 
           <div className="relative mt-3 space-y-2">
-            <GeoInput label="From" value={start} color="#15803d" onPick={(g) => { setStart(g); setRoute(null) }} onClear={() => setStart(undefined)} />
-            <GeoInput label="To" value={end} color="#c2410c" onPick={(g) => { setEnd(g); setRoute(null) }} onClear={() => setEnd(undefined)} />
+            <GeoInput label="From" value={start} color="#15803d" onPick={(g) => setPoint('A', g)} onClear={() => { setStart(undefined); setRoute(null); setTapTarget('A') }} />
+            <GeoInput label="To" value={end} color="#c2410c" onPick={(g) => setPoint('B', g)} onClear={() => { setEnd(undefined); setRoute(null); setTapTarget('B') }} />
             <button
               onClick={swap}
               disabled={!start && !end}
@@ -490,9 +528,25 @@ export default function RoutePlanner() {
             </button>
           </div>
 
+          <div className="mt-2.5 flex items-center gap-2 text-xs text-muted" role="group" aria-label="Which point a tap on the map sets">
+            <span className="shrink-0">Tap the map to set</span>
+            {(['A', 'B'] as const).map((w) => (
+              <button
+                key={w}
+                onClick={() => setTapTarget(w)}
+                aria-pressed={tapTarget === w}
+                className={`inline-flex min-h-[32px] items-center gap-1.5 rounded-full border px-2.5 font-semibold transition-colors ${tapTarget === w ? 'border-transparent text-white' : 'border-border bg-card text-ink hover:bg-surface'}`}
+                style={tapTarget === w ? { background: w === 'A' ? '#15803d' : '#c2410c' } : undefined}
+              >
+                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold ${tapTarget === w ? 'bg-white/25' : 'text-white'}`} style={tapTarget === w ? undefined : { background: w === 'A' ? '#15803d' : '#c2410c' }} aria-hidden="true">{w}</span>
+                {w === 'A' ? 'Start' : 'Destination'}
+              </button>
+            ))}
+          </div>
+
           <fieldset className="mt-4">
             <legend className="mb-2 text-xs font-bold uppercase tracking-wider text-muted">I'm travelling…</legend>
-            <div role="radiogroup" className="grid grid-cols-1 gap-1.5">
+            <div role="radiogroup" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {PROFILES.map((p) => {
                 const Icon = PROFILE_ICON[p.id]
                 const on = profile === p.id
@@ -501,22 +555,17 @@ export default function RoutePlanner() {
                     key={p.id}
                     role="radio"
                     aria-checked={on}
+                    aria-label={`${p.label}: ${p.desc}`}
                     onClick={() => chooseProfile(p.id)}
-                    className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition-colors ${on ? 'border-transparent text-white' : 'border-border bg-card hover:bg-surface'}`}
+                    className={`flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-semibold transition-colors ${on ? 'border-transparent text-white' : 'border-border bg-card text-ink hover:bg-surface'}`}
                     style={on ? { background: ROUTE_COLOR[p.id] } : undefined}
                   >
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${on ? 'bg-white/20' : 'bg-surface text-muted'}`}>
-                      <Icon size={18} aria-hidden="true" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">{p.label}</span>
-                      <span className={`block text-xs ${on ? 'text-white/85' : 'text-muted'}`}>{p.desc}</span>
-                    </span>
-                    {on && <CheckCircle2 size={18} aria-hidden="true" />}
+                    <Icon size={16} aria-hidden="true" /> {p.short}
                   </button>
                 )
               })}
             </div>
+            <p className="mt-1.5 text-xs text-muted">{PROFILES.find((p) => p.id === profile)?.desc}</p>
           </fieldset>
 
           <div className="mt-4 flex gap-2">
@@ -526,7 +575,7 @@ export default function RoutePlanner() {
             </button>
           </div>
           {!start || !end ? (
-            <p className="mt-2 text-center text-xs text-muted">Search above, or tap the map to set A then B.</p>
+            <p className="mt-2 text-center text-xs text-muted">Search for both places, or tap the map. Drag a pin to adjust it.</p>
           ) : null}
 
           {err && (

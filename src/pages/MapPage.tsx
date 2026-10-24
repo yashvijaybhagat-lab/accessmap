@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Loader2, X, LocateFixed, Accessibility, MapPin as MapPinIcon, AlertTriangle, Route as RouteIcon,
   Navigation, Navigation2, ChevronRight, Info, RefreshCw, Eye, Ear, Brain, TrainFront, Footprints, List, Sparkles,
@@ -11,10 +11,12 @@ import PlaceSheet, { type Selected, routeHref, placeDetailHref } from '../compon
 import { scoreColor, scoreWord } from '../components/ScoreRing'
 import { getPlaces, getAlerts, getSpecsFor } from '../lib/data'
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
-import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, type Poi, type CategoryKey } from '../lib/overpass'
+import { CATEGORIES, categoryColor, nearbyByCategory, haversineKm, deriveAccess, type Poi, type CategoryKey } from '../lib/overpass'
 import { nominatimNearby, nominatimLookupMany } from '../lib/nominatimPois'
 import { poisFromTiles, placesAround, TILE_POI_MIN_ZOOM } from '../lib/tilePois'
 import { applyCommunitySpecs } from '../lib/community'
+import { contextFor } from '../lib/accessContext'
+import type { AccessContext } from '../lib/rating'
 import type { Map as MlMap } from 'maplibre-gl'
 import { getNearbyTransit, getNearbyWalkingPaths, type TransitLine, type TransitStation, type WalkingPath } from '../lib/transit'
 import { batchWikiImages } from '../lib/wikipedia'
@@ -93,7 +95,8 @@ export default function MapPage() {
   const [locStatus, setLocStatus] = useState<'idle' | 'searching' | 'live' | 'denied' | 'unavailable' | 'unsupported'>('idle')
   const [following, setFollowing] = useState(false)
   const followRef = useRef(false); followRef.current = following
-  const [locNotice, setLocNotice] = useState<{ kind: 'denied' | 'unavailable' | 'unsupported' | 'coarse'; msg: string } | null>(null)
+  const [locNotice, setLocNotice] = useState<{ kind: 'denied' | 'unavailable' | 'unsupported' | 'coarse'; msg: string; how?: string } | null>(null)
+  const [noticeOpen, setNoticeOpen] = useState(false)
   const mapRef = useRef<MlMap | null>(null)
   const [viewCenter, setViewCenter] = useState<[number, number] | null>(null)
   const [lastSearch, setLastSearch] = useState<{ cat: CategoryKey; center: [number, number] } | null>(null)
@@ -116,6 +119,8 @@ export default function MapPage() {
   const [pois, setPois] = useState<Poi[]>([])
   const [loadingPois, setLoadingPois] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  // Phones: the results list opens half-height so the map stays visible; expand for more.
+  const [listExpanded, setListExpanded] = useState(false)
   const [showA11y, setShowA11y] = useState(true)
   const [forMeOnly, setForMeOnly] = useState(false)
   const [dis, setDis] = useState<Set<Dimension>>(new Set())
@@ -185,8 +190,11 @@ export default function MapPage() {
   }, [])
 
   // Search overlay picked a place → fly the map there (and stop following the user).
+  // Set when the map opened for a searched place, so the first GPS fix doesn't pull the view away.
+  const keepViewRef = useRef(false)
   useEffect(() => {
     if (!mapTarget) return
+    keepViewRef.current = true
     setFollowing(false)
     setCenter([mapTarget.lat, mapTarget.lng])
     setFocus({ lat: mapTarget.lat, lng: mapTarget.lng, zoom: mapTarget.zoom ?? 15 })
@@ -230,10 +238,10 @@ export default function MapPage() {
         : kind === 'unsupported'
           ? 'This browser can’t share your location (it needs a secure https connection and location support).'
           : 'Your device couldn’t work out where you are. On a Mac: System Settings → Privacy & Security → Location Services → turn it on for your browser, and keep Wi-Fi on. On a phone: turn Location on. We’ll keep trying.'
-    setLocNotice({ kind, msg: `Showing an approximate area based on your internet connection — it can be 5–15 km off. ${how}` })
+    setLocNotice({ kind, msg: 'Approximate location — based on your internet connection, can be 5–15 km off.', how })
     if (userLocRef.current) return // keep the last real fix on screen
     const c = await ipCoords()
-    if (c && !userLocRef.current) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
+    if (c && !userLocRef.current && !keepViewRef.current) { setCenter(c); setFocus({ lat: c[0], lng: c[1], zoom: 12 }) }
   }
 
   /**
@@ -257,10 +265,10 @@ export default function MapPage() {
         setLocating(false)
         setLocNotice(
           accuracy > 1000
-            ? { kind: 'coarse', msg: `Your position is only accurate to about ${(accuracy / 1000).toFixed(1)} km. Turn on Wi-Fi or GPS for a precise location.` }
+            ? { kind: 'coarse', msg: `Location only accurate to about ${(accuracy / 1000).toFixed(1)} km.`, how: 'Turn on Wi-Fi or GPS for a precise location.' }
             : null,
         )
-        if (first) { setCenter([lat, lng]); setFollowing(true); setFocus({ lat, lng, zoom: zoomForAccuracy(accuracy) }) }
+        if (first && !keepViewRef.current) { setCenter([lat, lng]); setFollowing(true); setFocus({ lat, lng, zoom: zoomForAccuracy(accuracy) }) }
         else if (followRef.current) setFocus({ lat, lng, follow: true })
       },
       (err) => {
@@ -307,7 +315,7 @@ export default function MapPage() {
   }, [q])
 
   async function searchCategory(cat: CategoryKey, c: [number, number]) {
-    setActiveCat(cat); setPanelOpen(true)
+    setActiveCat(cat); setPanelOpen(true); setListExpanded(false)
     setLastSearch({ cat, center: c })
     poiAbort.current?.abort()
     const ac = new AbortController(); poiAbort.current = ac
@@ -328,10 +336,13 @@ export default function MapPage() {
     let real: Poi[] = []       // places with their real OSM tags
     let swept: Poi[] = []      // every named place in the area, from the street-level map tiles
     let community = new Map<string, AccessSpecs[]>()
-    const view = () => {
-      const list = withUnmatchedTiles(real, [...swept, ...tiles])
-      return community.size ? list.map((p) => { const sp = community.get(placeKey(p)); return sp ? applyCommunitySpecs(p, sp) : p }) : list
-    }
+    let measured = new Map<string, AccessContext>() // slope, building height, parking — by place id
+    const view = () => withUnmatchedTiles(real, [...swept, ...tiles]).map((p) => {
+      const ctx = measured.get(p.id)
+      const q = ctx ? { ...p, ...deriveAccess(p.tags ?? {}, p.category, ctx), context: ctx } : p
+      const sp = community.get(placeKey(q))
+      return sp ? applyCommunitySpecs(q, sp) : q
+    })
     const render = () => {
       if (ac.signal.aborted) return
       const list = view()
@@ -364,12 +375,15 @@ export default function MapPage() {
       if (!real.length && !swept.length && !tiles.length && (nomOk || sweepOk)) {
         await nominatimNearby(c, cat, 15000, (batch) => { real = mergePois(real, batch, false); render() }, ac.signal).catch((e) => { if (e?.name === 'AbortError') throw e })
       }
-      // Ratings reported by AccessMap users.
+      // Measure each place's surroundings, and fetch ratings reported by AccessMap users.
+      const rated = view().filter((p) => !p.id.startsWith('tile-'))
       const ids = view().map(placeKey)
-      if (ids.length) {
-        community = await getSpecsFor(ids).catch(() => new Map<string, AccessSpecs[]>())
-        render()
-      }
+      const [ctx, specs] = await Promise.all([
+        rated.length ? contextFor(rated.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng })), ac.signal).catch((e) => { if (e?.name === 'AbortError') throw e; return new Map<string, AccessContext>() }) : new Map<string, AccessContext>(),
+        ids.length ? getSpecsFor(ids).catch(() => new Map<string, AccessSpecs[]>()) : new Map<string, AccessSpecs[]>(),
+      ])
+      measured = ctx; community = specs
+      render()
       const opOk = await fromOverpass
       if (ac.signal.aborted) return
       setRefining(false)
@@ -415,6 +429,7 @@ export default function MapPage() {
   }, [])
   const onPoiSelect = useCallback((p: Poi) => {
     setFollowing(false)
+    setListExpanded(false)
     setFocus({ lat: p.lat, lng: p.lng, zoom: 16 })
     setSelected({ kind: 'poi', data: p })
   }, [])
@@ -438,6 +453,19 @@ export default function MapPage() {
     if (c) searchCategory(cat, c)
     else { setActiveCat(cat); setPanelOpen(true); setLoadingPois(true); startLocation(true) }
   }
+
+  // /map?cat=cafe (from search or links) opens that category straight away.
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    const k = params.get('cat') as CategoryKey | null
+    if (!k || !CATEGORIES.some((c) => c.key === k)) return
+    const next = new URLSearchParams(params); next.delete('cat')
+    setParams(next, { replace: true })
+    const c = currentCenter()
+    if (c) searchCategory(k, c)
+    else { setActiveCat(k); setPanelOpen(true); setLoadingPois(true); startLocation(true) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params])
 
   // If a category was chosen before the map had a position, run it once one arrives.
   useEffect(() => {
@@ -541,6 +569,19 @@ export default function MapPage() {
 
   const fmtKm = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`)
   const navBottom = 'calc(3.25rem + env(safe-area-inset-bottom) + 1rem)'
+  // Phones: when the half-height list is open, lift the map buttons above it.
+  const asideRef = useRef<HTMLElement>(null)
+  const [listH, setListH] = useState(0)
+  useEffect(() => {
+    const el = asideRef.current
+    if (!el || !panelOpen) { setListH(0); return }
+    const narrow = window.matchMedia('(max-width: 639px)')
+    const update = () => setListH(narrow.matches && !listExpanded ? el.getBoundingClientRect().height : 0)
+    update()
+    const ro = new ResizeObserver(update); ro.observe(el)
+    narrow.addEventListener('change', update)
+    return () => { ro.disconnect(); narrow.removeEventListener('change', update) }
+  }, [panelOpen, listExpanded])
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#eef1f6]">
@@ -561,11 +602,13 @@ export default function MapPage() {
           transitLines={transitLines}
           transitStations={transitStations}
           walkingPaths={walkingPaths}
-          controlsBottom={navBottom}
+          controlsBottom={listH ? `calc(${navBottom} + ${Math.round(listH) + 8}px)` : navBottom}
+          compactControls={listH > 0}
           onReady={onMapReady}
           onUserGesture={onUserGesture}
           controls={
             <>
+              {!listH && <>
               <button
                 onClick={toggleTransit}
                 aria-pressed={showTransit}
@@ -591,6 +634,7 @@ export default function MapPage() {
               >
                 <List size={16} aria-hidden="true" /> <span className="map-ctl-text">List</span>
               </button>
+              </>}
               <button
                 onClick={() => locateExplicit()}
                 aria-label={locStatus === 'live' ? (following ? 'Following your location' : 'Show and follow my location') : 'Find my location'}
@@ -644,27 +688,56 @@ export default function MapPage() {
         {locNotice && (
           <div
             role="status"
-            className={`pointer-events-auto flex shrink-0 items-start gap-2.5 rounded-2xl px-3.5 py-3 text-sm shadow-md ${
+            className={`pointer-events-auto shrink-0 rounded-2xl px-3 py-2 text-[13px] shadow-md ${
               locNotice.kind === 'coarse' ? 'bg-[#e8f0fe] text-[#0b3d91]' : 'bg-[#fff7ed] text-[#7c2d12]'
             }`}
           >
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <p className="leading-snug">{locNotice.msg}</p>
-              {locNotice.kind !== 'coarse' && locNotice.kind !== 'unsupported' && (
-                <button onClick={() => startLocation(true)} className="mt-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-bold underline-offset-2 hover:underline">
-                  Retry
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="shrink-0" aria-hidden="true" />
+              <p className="min-w-0 flex-1 leading-snug">{locNotice.msg}</p>
+              {locNotice.how && (
+                <button onClick={() => setNoticeOpen((o) => !o)} aria-expanded={noticeOpen} className="shrink-0 rounded-full px-2 py-1 text-xs font-bold underline underline-offset-2 hover:bg-black/5">
+                  {noticeOpen ? 'Hide' : 'How to fix'}
                 </button>
               )}
+              <button onClick={() => setLocNotice(null)} aria-label="Dismiss location message" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-black/5">
+                <X size={14} aria-hidden="true" />
+              </button>
             </div>
-            <button onClick={() => setLocNotice(null)} aria-label="Dismiss location message" className="-m-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-black/5">
-              <X size={14} aria-hidden="true" />
-            </button>
+            {noticeOpen && locNotice.how && (
+              <div className="mt-1.5 pl-6">
+                <p className="leading-snug">{locNotice.how}</p>
+                {locNotice.kind !== 'coarse' && locNotice.kind !== 'unsupported' && (
+                  <button onClick={() => startLocation(true)} className="mt-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-bold hover:underline">
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
+        {/* Category chips */}
+        <div
+          className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6"
+          role="group"
+          aria-label="Find nearby"
+        >
+          {CATEGORIES.map(({ key, label, icon: Icon, color }) => (
+            <button
+              key={key}
+              onClick={() => runCategory(key)}
+              className={`chip shrink-0 ${activeCat === key ? 'chip-active' : ''}`}
+              aria-pressed={activeCat === key}
+            >
+              <Icon size={15} aria-hidden="true" style={activeCat === key ? undefined : { color }} /> {label}
+            </button>
+          ))}
+        </div>
+
         {/* Needs filters */}
-        <div className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6" role="group" aria-label="Filter by access need">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6" role="group" aria-label="Only show places good for">
+          <span className="shrink-0 rounded-full bg-white/85 px-2 py-1 text-xs font-semibold text-muted shadow-sm">Good for</span>
           {profileActive && (
             <button
               onClick={() => setForMeOnly((s) => !s)}
@@ -693,24 +766,6 @@ export default function MapPage() {
           </button>
         </div>
 
-        {/* Category chips */}
-        <div
-          className="pointer-events-auto flex shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_88%,transparent)] pr-6"
-          role="group"
-          aria-label="Find nearby"
-        >
-          {CATEGORIES.map(({ key, label, icon: Icon, color }) => (
-            <button
-              key={key}
-              onClick={() => runCategory(key)}
-              className={`chip shrink-0 ${activeCat === key ? 'chip-active' : ''}`}
-              aria-pressed={activeCat === key}
-            >
-              <Icon size={15} aria-hidden="true" style={activeCat === key ? undefined : { color }} /> {label}
-            </button>
-          ))}
-        </div>
-
         {movedAway && lastSearch && (
           <button
             onClick={() => { const c = currentCenter(); if (c) searchCategory(lastSearch.cat, c) }}
@@ -722,7 +777,7 @@ export default function MapPage() {
 
         {/* Results panel */}
         {panelOpen && (
-          <aside aria-label={`${activeCatMeta?.label ?? 'Places'} near you`} className="glass pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl">
+          <aside ref={asideRef} aria-label={`${activeCatMeta?.label ?? 'Places'} near you`} className={`glass pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-3xl ${listExpanded ? 'flex-1' : 'mt-auto max-h-[46%] sm:mt-0 sm:max-h-none sm:flex-1'}`}>
             <div className="flex items-center gap-3 border-b border-border/70 px-4 py-3">
               {activeCatMeta && (
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white" style={{ background: activeCatMeta.color }} aria-hidden="true">
@@ -738,6 +793,14 @@ export default function MapPage() {
                   )}
                 </p>
               </div>
+              <button
+                onClick={() => setListExpanded((x) => !x)}
+                aria-expanded={listExpanded}
+                aria-label={listExpanded ? 'Show the map' : 'Show the full list'}
+                className="flex h-10 items-center gap-1 rounded-full px-3 text-xs font-bold text-primary hover:bg-primary/10 sm:hidden"
+              >
+                {listExpanded ? <><MapPinIcon size={14} aria-hidden="true" /> Map</> : <><List size={14} aria-hidden="true" /> List</>}
+              </button>
               <button
                 onClick={() => { poiAbort.current?.abort(); setRefining(false); setPanelOpen(false); setActiveCat(null); setPois([]) }}
                 aria-label="Close results"

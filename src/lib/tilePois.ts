@@ -161,3 +161,59 @@ export async function placesAround(
   }
   return out.sort((a, b) => a._d - b._d).slice(0, limit).map(({ _d, ...poi }) => poi)
 }
+
+/* ── Physical facts around a point, from the same street-level tiles ── */
+
+/** Even-odd point-in-polygon across all rings of a tile feature (holes included). */
+function inside(rings: { x: number; y: number }[][], px: number, py: number): boolean {
+  let hit = false
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i], b = ring[j]
+      if ((a.y > py) !== (b.y > py) && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) hit = !hit
+    }
+  }
+  return hit
+}
+
+/**
+ * Height of the building at a point and the distance to the nearest car park,
+ * from the z14 map tile. Either may be undefined (no building there / no car
+ * park in that tile).
+ */
+export async function tileFacts(lat: number, lng: number, signal?: AbortSignal): Promise<{ buildingHeightM?: number; parkingM?: number }> {
+  const fx = lng2x(lng), fy = lat2y(lat)
+  const x = Math.floor(fx), y = Math.floor(fy)
+  const template = await tileUrl()
+  const vt = await loadTile(template.replace('{z}', String(Z)).replace('{x}', String(x)).replace('{y}', String(y)), signal)
+  const out: { buildingHeightM?: number; parkingM?: number } = {}
+
+  const b = vt.layers.building
+  if (b) {
+    const px = (fx - x) * b.extent, py = (fy - y) * b.extent
+    for (let i = 0; i < b.length; i++) {
+      const f = b.feature(i)
+      const bb = f.bbox?.()
+      if (bb && (px < bb[0] || px > bb[2] || py < bb[1] || py > bb[3])) continue
+      if (inside(f.loadGeometry(), px, py)) {
+        const h = Number(f.properties.render_height)
+        if (Number.isFinite(h)) out.buildingHeightM = Math.max(out.buildingHeightM ?? 0, h)
+      }
+    }
+  }
+
+  const poi = vt.layers.poi
+  if (poi) {
+    const px = (fx - x) * poi.extent, py = (fy - y) * poi.extent
+    const mPerUnit = (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / 2 ** Z / poi.extent
+    for (let i = 0; i < poi.length; i++) {
+      const f = poi.feature(i)
+      if (f.properties.class !== 'parking' || f.properties.subclass === 'bicycle_parking') continue
+      const pt = f.loadGeometry()[0]?.[0]
+      if (!pt) continue
+      const m = Math.hypot(pt.x - px, pt.y - py) * mPerUnit
+      if (out.parkingM == null || m < out.parkingM) out.parkingM = m
+    }
+  }
+  return out
+}
