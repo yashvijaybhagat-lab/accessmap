@@ -42,7 +42,7 @@ export function applyCommunitySpecs(poi: Poi, specs: AccessSpecs[]): Poi {
   const tags = { ...add, ...(poi.tags ?? {}) } // OSM wins where both exist
   return {
     ...poi,
-    ...deriveAccess(tags, poi.category),
+    ...deriveAccess(tags, poi.category, poi.context),
     tags,
     communityReports: specs.length,
   }

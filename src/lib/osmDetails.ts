@@ -1,6 +1,8 @@
 import type { AccessSpecs } from '../types'
 import { deriveAccess, overpassQuery as hedgedOverpass, type ScoreBreakdown } from './overpass'
 import { nominatimLookup, nominatimByName } from './nominatimPois'
+import { contextFor } from './accessContext'
+import type { AccessContext } from './rating'
 import { fetchWikiImage } from './wikipedia'
 
 export interface OsmData {
@@ -143,7 +145,7 @@ function subQuery(lat: number, lng: number) {
     out center tags 30;`
 }
 
-async function fetchViaOverpass(lat: number, lng: number, signal?: AbortSignal): Promise<OsmData | null> {
+async function fetchViaOverpass(lat: number, lng: number, signal?: AbortSignal, ctx?: AccessContext): Promise<OsmData | null> {
   // q1: Named elements within 200m (catches large buildings as relations)
   const q1 = `
     [out:json][timeout:9];
@@ -206,7 +208,7 @@ async function fetchViaOverpass(lat: number, lng: number, signal?: AbortSignal):
     return { el, t, score }
   })
   scored.sort((a, b) => b.score - a.score)
-  return buildOsmData(scored[0].el, scored[0].t, subElements, true)
+  return buildOsmData(scored[0].el, scored[0].t, subElements, true, ctx)
 }
 
 /** Accessibility sub-features (elevators, entrances, toilets, parking…) around a point. */
@@ -224,10 +226,12 @@ export async function fetchOsmDetails(
   lat: number, lng: number, signal?: AbortSignal,
   opts: { osmId?: string; name?: string; onQuick?: (d: OsmData) => void } = {},
 ): Promise<OsmData | null> {
+  // Measured surroundings (slope, building height, parking) — same as the search results use.
+  const ctxP = contextFor([{ id: 'p', lat, lng }], signal).then((m) => m.get('p')).catch(() => undefined)
   let osmId = opts.osmId && /^(node|way|relation)\/\d+$/.test(opts.osmId) ? opts.osmId : undefined
   // No id (e.g. a curated place or a map-tile place): match it by name right at its position.
   if (!osmId && opts.name) osmId = (await nominatimByName(opts.name, [lat, lng], signal)) ?? undefined
-  if (!osmId) return fetchViaOverpass(lat, lng, signal)
+  if (!osmId) return fetchViaOverpass(lat, lng, signal, await ctxP)
   const [main, subs] = await Promise.all([
     nominatimLookup(osmId, signal).then(async (m) => {
       if (m && opts.onQuick && !signal?.aborted) opts.onQuick(await buildOsmData(elRef(osmId!), m.tags, [], false))
@@ -235,20 +239,21 @@ export async function fetchOsmDetails(
     }),
     fetchSubElements(lat, lng, signal).catch((e) => { if (e?.name === 'AbortError') throw e; return [] as any[] }),
   ])
-  if (!main) return fetchViaOverpass(lat, lng, signal).catch(() => null)
-  return buildOsmData(elRef(osmId), main.tags, subs, true)
+  const ctx = await ctxP
+  if (!main) return fetchViaOverpass(lat, lng, signal, ctx).catch(() => null)
+  return buildOsmData(elRef(osmId), main.tags, subs, true, ctx)
 }
 
 const elRef = (osmId: string) => { const [type, id] = osmId.split('/'); return { type, id } }
 
-async function buildOsmData(mainEl: { type: string; id: string | number }, mainTags: Record<string, string>, subElements: any[], enrich: boolean): Promise<OsmData> {
+async function buildOsmData(mainEl: { type: string; id: string | number }, mainTags: Record<string, string>, subElements: any[], enrich: boolean, ctx?: AccessContext): Promise<OsmData> {
 
   // Merge sub-element tags into main tags for richer data
   const subTags = subElements.map((el: any) => el.tags ?? {} as Record<string, string>)
   const t = mergeTags(mainTags, subTags)
 
   // Run scoring engine on merged tags
-  const derived = deriveAccess(t)
+  const derived = deriveAccess(t, undefined, ctx)
 
   // ── Map to AccessSpecs ────────────────────────────────────────────
   const specs: Partial<AccessSpecs> = {}

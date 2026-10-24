@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { spaced } from './rateLimit'
 import { batchWikiImages } from './wikipedia'
+import { scoreAccess, type AccessContext, type Factor } from './rating'
 
 export interface ScoreBreakdown {
   base: number | null
@@ -12,6 +13,8 @@ export interface ScoreBreakdown {
   penalties: { label: string; points: number }[]
   total: number | null
   confidence: 'high' | 'medium' | 'low' | 'none'
+  /** How the score was built — one entry per factor (see rating.ts). */
+  factors?: Factor[]
 }
 
 export interface Poi {
@@ -76,6 +79,8 @@ export interface Poi {
   tags?: Record<string, string>
   /** Number of AccessMap community reports folded into this place's rating. */
   communityReports?: number
+  /** Measured surroundings used in the score (slope, building height, parking). */
+  context?: AccessContext
 }
 
 const SMOOTH = ['asphalt', 'paved', 'concrete', 'paving_stones', 'wood', 'metal', 'rubber', 'tartan', 'tiles']
@@ -97,40 +102,7 @@ function terrainFrom(tags: Record<string, string>): { terrain: string; surface?:
   return { terrain: 'Unknown', surface }
 }
 
-/**
- * Honest accessibility scoring from OSM tags.
- *
- * Base scores (NOT inflated):
- *   wheelchair=yes     → 6.0  (confirmed accessible entry, not perfect)
- *   wheelchair=limited → 3.0  (some barriers exist)
- *   wheelchair=no      → 1.0  (hard cap at 2.5 even with bonuses)
- *   inferred smooth    → 4.0  (low confidence)
- *   inferred uneven    → 2.5
- *   inferred rough     → 1.5
- *   no data            → null (shown as Unrated)
- */
-// Category-level priors applied when OSM has wheelchair=yes but no detail tags.
-// These reflect legally-mandated or statistically typical accessibility for the venue type.
-const CATEGORY_PRIORS: Partial<Record<CategoryKey, {
-  inferLift?: boolean
-  inferToilet?: boolean
-  inferParking?: boolean
-  // Base score for when ZERO accessibility data exists (no wheelchair tag, no surface)
-  // These are conservative real-world averages, not optimistic guesses
-  unratedBase: number
-  unratedReason: string
-}>> = {
-  hospital:   { inferLift: true,  inferToilet: true,  inferParking: true,  unratedBase: 7.0, unratedReason: 'Healthcare facility — legally required to meet accessibility standards' },
-  pharmacy:   { inferToilet: false, inferParking: false, unratedBase: 5.5, unratedReason: 'Pharmacy — typically accessible entrance required by regulation' },
-  hotel:      { inferLift: true,  unratedBase: 5.5, unratedReason: 'Hotel — usually has at least one accessible room and lift' },
-  bank:       { unratedBase: 5.0, unratedReason: 'Bank/ATM — typically step-free entrance required' },
-  school:     { unratedBase: 4.5, unratedReason: 'School — public building, accessibility varies widely' },
-  shop:       { unratedBase: 4.0, unratedReason: 'Retail shop — accessibility varies; assume basic entrance' },
-  restaurant: { unratedBase: 3.5, unratedReason: 'Restaurant — accessibility highly variable' },
-  cafe:       { unratedBase: 3.5, unratedReason: 'Café — accessibility highly variable' },
-  park:       { unratedBase: 3.0, unratedReason: 'Park — surface varies; many parks have paved paths but not all' },
-  attraction: { unratedBase: 4.5, unratedReason: 'Tourist attraction — modern ones tend to be accessible; older ones vary' },
-}
+/* Scoring lives in rating.ts — deriveAccess extracts the details it needs from the tags. */
 
 /**
  * Parse OSM measurement strings to centimetres.
@@ -151,9 +123,9 @@ function parseCm(raw: string): number | null {
   return v < 5 ? Math.round(v * 100) : Math.round(v)
 }
 
-export function deriveAccess(tags: Record<string, string>, category?: CategoryKey): Omit<Poi,
+export function deriveAccess(tags: Record<string, string>, category?: CategoryKey, ctx?: AccessContext): Omit<Poi,
   'id' | 'osmId' | 'name' | 'lat' | 'lng' | 'category' | 'address'
-  | 'imageUrl' | 'openingHours' | 'phone' | 'website' | 'wheelchairDescription'
+  | 'imageUrl' | 'openingHours' | 'phone' | 'website' | 'wheelchairDescription' | 'communityReports' | 'context'
 > {
   const wRaw = (tags.wheelchair || '').toLowerCase()
   const wheelchair = (['yes', 'limited', 'no'].includes(wRaw) ? wRaw : undefined) as Poi['wheelchair']
@@ -229,95 +201,37 @@ export function deriveAccess(tags: Record<string, string>, category?: CategoryKe
   // Only use corridor-specific width tags — not the generic 'width'
   const corridorWidthCm = parseCm(tags['min_width'] || tags['wheelchair:width'] || '') || undefined
 
-  // ── Base ─────────────────────────────────────────────────────────
-  let base: number | null = null
-  let baseReason = ''
-  let confidence: ScoreBreakdown['confidence'] = 'none'
-  let inferred = false
+  // ── Score: five weighted factors, best evidence first (rating.ts) ──
+  const toiletRaw = (tags['toilets:wheelchair'] || tags['wheelchair:toilets'] || '').toLowerCase()
+  const scored = scoreAccess(tags, {
+    wheelchair, stepCount, hasRamp, steepIncline, rampGradient,
+    accessibleToiletTag: toiletRaw === 'yes' ? 'yes' : toiletRaw === 'no' ? 'no' : undefined,
+    terrain, surface, hasLift, liftNo: liftRaw === 'no',
+    doorType, doorWidthCm: doorWidthCm ?? undefined, hasDisabledParking,
+    hearingLoop, tactile, brailleMenu, quietRoom, changingPlace, hasWheelchairSeating,
+  }, category, ctx)
+  const total = scored.total
+  const effectiveLift = hasLift
+  const effectiveToilet = accessibleToilet
+  const effectiveParking = hasDisabledParking
 
-  if (wheelchair === 'yes') {
-    base = 6.0; baseReason = 'Confirmed wheelchair accessible'; confidence = 'high'
-  } else if (wheelchair === 'limited') {
-    base = 3.0; baseReason = 'Partially accessible — barriers present'; confidence = 'high'
-  } else if (wheelchair === 'no') {
-    base = 1.0; baseReason = 'Marked as not accessible'; confidence = 'high'
-  } else if (terrain === 'Smooth') {
-    base = 4.0; baseReason = 'Smooth surface (accessibility unconfirmed)'; confidence = 'low'; inferred = true
-  } else if (terrain === 'Uneven') {
-    base = 2.5; baseReason = 'Uneven surface — likely difficult'; confidence = 'low'; inferred = true
-  } else if (terrain === 'Rough') {
-    base = 1.5; baseReason = 'Rough/unpaved — likely inaccessible'; confidence = 'low'; inferred = true
-  }
-
-  // ── Category-based priors ─────────────────────────────────────────
-  const prior = category ? CATEGORY_PRIORS[category] : undefined
-  // When there is NO accessibility data at all, assign a category-based estimated score
-  if (base === null) {
-    base = prior?.unratedBase ?? 3.0
-    baseReason = prior?.unratedReason ?? 'No accessibility data — estimated from venue type'
-    confidence = 'low'
-    inferred = true
-  }
-
-  // Resolve effective flags (real tag OR category prior)
-  const effectiveLift    = hasLift    || (!hasLift    && wheelchair === 'yes' && !!prior?.inferLift)
-  const effectiveToilet  = accessibleToilet || (!accessibleToilet && wheelchair === 'yes' && !!prior?.inferToilet)
-  const effectiveParking = hasDisabledParking || (!hasDisabledParking && wheelchair === 'yes' && !!prior?.inferParking)
-
-  // ── Bonuses ───────────────────────────────────────────────────────
-  const bonuses: { label: string; points: number }[] = []
-  if (base !== null && wheelchair !== 'no') {
-    if (effectiveToilet)   bonuses.push({ label: accessibleToilet ? 'Accessible toilet ✓' : 'Accessible toilet (typical for this venue) ✓', points: 1.0 })
-    if (tactile)           bonuses.push({ label: 'Tactile paving ✓', points: 0.5 })
-    if (terrain === 'Smooth' && !inferred) bonuses.push({ label: 'Smooth flooring ✓', points: 0.5 })
-    if (hasRamp && wheelchair !== 'yes') bonuses.push({ label: 'Ramp present ✓', points: 0.5 })
-    if (effectiveLift)     bonuses.push({ label: hasLift ? 'Lift/elevator ✓' : 'Lift (typical for this venue) ✓', points: 0.5 })
-    if (doorType === 'Automatic') bonuses.push({ label: 'Automatic doors ✓', points: 0.3 })
-    if (effectiveParking)  bonuses.push({ label: hasDisabledParking ? 'Disabled parking ✓' : 'Disabled parking (typical) ✓', points: 0.2 })
-    if (hearingLoop)       bonuses.push({ label: 'Hearing loop ✓', points: 0.3 })
-    if (hasWheelchairSeating) bonuses.push({ label: 'Wheelchair seating available ✓', points: 0.2 })
-    if (changingPlace)     bonuses.push({ label: 'Changing Place facility ✓', points: 0.5 })
-    if (quietRoom)         bonuses.push({ label: 'Quiet / sensory room ✓', points: 0.3 })
-  }
-
-  // ── Penalties ─────────────────────────────────────────────────────
-  const penalties: { label: string; points: number }[] = []
-  if (base !== null) {
-    if (wheelchair === 'yes' && terrain === 'Rough')
-      penalties.push({ label: 'Rough surface despite accessible tag ⚠', points: -1.5 })
-    else if (wheelchair === 'yes' && terrain === 'Uneven')
-      penalties.push({ label: 'Uneven/irregular surface ⚠', points: -0.5 })
-    if (surface && (surface.includes('cobblestone') || surface === 'sett'))
-      penalties.push({ label: 'Cobblestone surface ⚠', points: -0.5 })
-    if (steepIncline)
-      penalties.push({ label: `Steep incline (${Math.abs(inclineRaw).toFixed(0)}%) ⚠`, points: -0.5 })
-  }
-
-  // ── Total ─────────────────────────────────────────────────────────
-  let total: number | null = null
-  if (base !== null) {
-    const s = bonuses.reduce((acc, b) => acc + b.points, 0)
-         + penalties.reduce((acc, p) => acc + p.points, 0)
-    total = base + s
-    if (wheelchair === 'no') total = Math.min(total, 2.5)
-    total = Math.max(0, Math.min(10, Math.round(total * 10) / 10))
-    if (!inferred && (bonuses.length >= 2 || wheelchair === 'yes')) confidence = 'high'
-    else if (!inferred) confidence = 'medium'
-    else confidence = bonuses.length > 0 ? 'low' : 'none'
-  }
-
+  // "Fully accessible" needs a confirmed accessible toilet (or no toilets at all), not just a high score.
+  const toiletFactor = scored.factors.find((f) => f.key === 'toilet')
+  const toiletConfirmed = !toiletFactor || (toiletFactor.source === 'mapped' && toiletFactor.value === 1)
   const accessLabel =
       wheelchair === 'no' ? 'Not accessible'
-    : total != null && total >= 8.5 ? 'Fully accessible'
-    : total != null && total >= 6.5 ? 'Accessible'
-    : total != null && total >= 4.5 ? 'Partly accessible'
-    : total != null && total >= 2.5 ? 'Limited access'
-    : total != null ? 'Poor access'
-    : 'Unrated'
+    : total >= 8.5 && toiletConfirmed ? 'Fully accessible'
+    : total >= 6.5 ? 'Accessible'
+    : total >= 4.5 ? 'Partly accessible'
+    : total >= 2.5 ? 'Limited access'
+    : 'Poor access'
 
   return {
     wheelchair, accessScore: total, accessLabel,
-    breakdown: { base, baseReason, bonuses, penalties, total, confidence },
+    breakdown: {
+      base: scored.base, baseReason: 'Weighted from entrance, toilet, ground, parking and inside',
+      bonuses: scored.bonuses, penalties: scored.penalties, total, confidence: scored.confidence, factors: scored.factors,
+    },
     terrain, surface,
     // Ramp
     hasRamp,

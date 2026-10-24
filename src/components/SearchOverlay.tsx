@@ -5,6 +5,26 @@ import { ArrowLeft, Search, Loader2, X, MapPin as MapPinIcon, Clock, ChevronRigh
 import { searchPlaces, type GeoResult } from '../lib/nominatim'
 import { useStore } from '../store/useStore'
 import { useReducedMotion } from '../lib/useAppMotion'
+import { CATEGORIES, type CategoryKey } from '../lib/overpass'
+
+// Words people type when they mean "find me one of these nearby".
+const CATEGORY_WORDS: Record<CategoryKey, string[]> = {
+  restaurant: ['restaurant', 'food', 'eat', 'dinner', 'lunch', 'breakfast', 'burger', 'pizza'],
+  cafe: ['coffee', 'cafe', 'café', 'tea', 'bakery'],
+  hotel: ['hotel', 'motel', 'stay', 'lodging', 'inn'],
+  hospital: ['hospital', 'doctor', 'clinic', 'urgent care', 'emergency', 'medical'],
+  pharmacy: ['pharmacy', 'drugstore', 'chemist', 'medicine', 'prescription'],
+  shop: ['shop', 'store', 'grocery', 'groceries', 'supermarket', 'shopping', 'mall'],
+  school: ['school', 'college', 'university'],
+  attraction: ['attraction', 'museum', 'things to do', 'tourist', 'gallery'],
+  park: ['park', 'playground', 'garden'],
+  bank: ['bank', 'atm', 'cash'],
+}
+function matchCategories(q: string) {
+  const t = q.trim().toLowerCase()
+  if (t.length < 2) return []
+  return CATEGORIES.filter((c) => CATEGORY_WORDS[c.key].some((w) => w.startsWith(t) || t.startsWith(w)) || c.label.toLowerCase().startsWith(t))
+}
 
 const RECENT_KEY = 'am.recentSearch'
 const MAX_RECENT = 6
@@ -64,6 +84,12 @@ export default function SearchOverlay() {
     navigate('/map')
   }
 
+  function nearby(key: CategoryKey) {
+    setOpen(false)
+    navigate(`/map?cat=${key}`)
+  }
+  const cats = matchCategories(q)
+
   const list = q.trim().length >= 3 ? results : recent
   const showingRecent = q.trim().length < 3 && recent.length > 0
 
@@ -112,6 +138,36 @@ export default function SearchOverlay() {
 
           {/* Results / recents */}
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-6">
+            {cats.length > 0 && (
+              <div className="mb-3 flex flex-col gap-2">
+                {cats.map(({ key, label, icon: Icon, color }) => (
+                  <button
+                    key={key}
+                    onClick={() => nearby(key)}
+                    className="flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3 text-left"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: color }} aria-hidden="true"><Icon size={17} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-ink">{label} near you</span>
+                      <span className="block text-xs text-muted">Best access first</span>
+                    </span>
+                    <ChevronRight size={16} className="shrink-0 text-primary" aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {!q.trim() && (
+              <div className="mb-4">
+                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Find nearby</p>
+                <div className="flex flex-wrap gap-2">
+                  {CATEGORIES.map(({ key, label, icon: Icon, color }) => (
+                    <button key={key} onClick={() => nearby(key)} className="chip">
+                      <Icon size={15} style={{ color }} aria-hidden="true" /> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {showingRecent && (
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Recent</p>

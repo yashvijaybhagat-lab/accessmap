@@ -27,6 +27,8 @@ interface Props {
   controls?: ReactNode
   /** CSS bottom offset for the control stack. */
   controlsBottom?: string
+  /** Only the essentials (caller's controls + zoom) — for when a panel leaves little room. */
+  compactControls?: boolean
   /** Called once the map is ready — lets the page query the map (e.g. POIs in view). */
   onReady?: (map: MlMap) => void
   /** The user dragged / zoomed / rotated the map themselves (stops "follow me"). */
@@ -71,7 +73,7 @@ function pinEl(opts: { color: string; text: string; label: string; ring?: string
 
 function MapView({
   places, pois = [], alertPlaceIds, userLocation, focus, selectedId, onSelect, onPoiSelect, onCenterChange,
-  className, transitLines = [], transitStations = [], walkingPaths = [], controls, controlsBottom, onReady, onUserGesture,
+  className, transitLines = [], transitStations = [], walkingPaths = [], controls, controlsBottom, compactControls, onReady, onUserGesture,
 }: Props) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
@@ -284,7 +286,7 @@ function MapView({
         style={{ bottom: controlsBottom ?? '1rem' }}
       >
         {controls}
-        <button
+        {!compactControls && <button
           onClick={() => setA11y('flatMap', !flat)}
           aria-pressed={!flat}
           aria-label={flat ? 'Switch to 3D map' : 'Switch to flat 2D map'}
@@ -292,7 +294,7 @@ function MapView({
         >
           {flat ? <Square size={16} aria-hidden="true" /> : <Box size={16} aria-hidden="true" />}
           <span aria-hidden="true">{flat ? '2D' : '3D'}</span>
-        </button>
+        </button>}
         {Math.abs(bearing) > 2 && (
           <button onClick={resetNorth} aria-label="Reset map to north" className="glass flex h-[44px] w-[44px] items-center justify-center rounded-full text-ink">
             <Compass size={18} style={{ transform: `rotate(${-bearing - 45}deg)` }} aria-hidden="true" />

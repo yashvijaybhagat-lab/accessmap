@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Accessibility, Navigation, Clock, Phone, ExternalLink } from 'lucide-react'
 import { scoreColor, scoreWord } from './ScoreRing'
 import AccessDescription from './AccessDescription'
+import ScoreFactors from './ScoreFactors'
 import { describePlace } from '../lib/describe'
 import type { Poi } from '../lib/overpass'
 import type { Place, Dimension } from '../types'
@@ -91,6 +92,13 @@ export default function PlaceSheet({ selected, onClose }: { selected: Selected; 
         <p className="mt-3 text-xs font-semibold text-[#1e8e3e]">
           Includes {selected.data.communityReports} AccessMap community report{selected.data.communityReports > 1 ? 's' : ''}
         </p>
+      ) : null}
+
+      {selected.kind === 'poi' && !fromTiles && selected.data.breakdown.factors?.length ? (
+        <details className="mt-4 rounded-2xl border border-border bg-card px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-ink">Why {selected.data.accessScore?.toFixed(1)}?</summary>
+          <div className="mt-3"><ScoreFactors factors={selected.data.breakdown.factors} compact /></div>
+        </details>
       ) : null}
 
       {desc && (
